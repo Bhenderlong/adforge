@@ -14,14 +14,29 @@
 
 <h2>Safety</h2>
 <div class="card">
-  <input type="hidden" name="bool_dry_run_present" value="1">
-  <label class="inline">
-    <input type="checkbox" name="bool_dry_run" {{ 'checked' if settings.dry_run }}>
-    <strong>Global dry run</strong> — build every request, transmit nothing
-  </label>
-  <div class="hint">The master switch. While on, no account can publish
-     regardless of its own setting. Turn it off only once you have read a few
-     generated posts and are happy with them.</div>
+  <p>
+    <strong>Global dry run</strong> is currently
+    {% if settings.dry_run %}
+      <span class="pill warn">ON</span> — every request is built and logged,
+      nothing is transmitted to any platform.
+    {% else %}
+      <span class="pill live">OFF</span> — enabled accounts publish for real.
+    {% endif %}
+  </p>
+  <div class="field" style="max-width:420px">
+    <label>To turn dry run OFF, type <code class="mono">GO LIVE</code></label>
+    <input type="text" name="disable_dry_run_confirm" autocomplete="off"
+           placeholder="leave blank to stay in dry run"
+           value="{{ 'GO LIVE' if not settings.dry_run else '' }}">
+    <div class="hint">
+      This is the one setting whose wrong value posts to the internet, so it is
+      not a checkbox — an incomplete or mistaken save can only ever leave it
+      <em>on</em>. Clear this box and save to go back to dry run.
+    </div>
+  </div>
+  <div class="hint">While dry run is on, no account can publish regardless of
+     its own setting. Turn it off only once you have read a few generated posts
+     and are happy with them.</div>
 
   <div class="grid g2" style="margin-top:14px">
     <div class="field">

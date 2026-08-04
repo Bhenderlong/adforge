@@ -918,9 +918,25 @@ async def settings_save(request: Request):
     for key in list(form.keys()):
         if key.startswith("bool_") and key.endswith("_present"):
             name = key[len("bool_"):-len("_present")]
+            if name == "dry_run":
+                continue  # handled below, it needs a stronger gate
             existing[f"ADFORGE_{name.upper()}"] = (
                 "true" if form.get(f"bool_{name}") else "false"
             )
+
+    # Dry run is the one setting whose wrong value publishes to the world, so
+    # it is not driven by a checkbox being absent. Turning it OFF requires an
+    # explicit typed confirmation; anything else leaves it on. A partial or
+    # malformed POST can therefore only ever fail safe.
+    #
+    # This is not hypothetical: exercising this endpoint during development
+    # silently flipped dry run off, because "checkbox missing" and "user wants
+    # live publishing" were the same signal.
+    if str(form.get("disable_dry_run_confirm", "")).strip().upper() == "GO LIVE":
+        existing["ADFORGE_DRY_RUN"] = "false"
+        log.warning("global dry run DISABLED via the settings page")
+    else:
+        existing["ADFORGE_DRY_RUN"] = "true"
 
     lines = ["# Written by the AdForge settings page. Restart to apply.\n"]
     lines += [f"{k}={v}\n" for k, v in sorted(existing.items())]
