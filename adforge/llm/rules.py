@@ -146,6 +146,12 @@ FABRICATED_METRIC = [
     r"speedup|performance)\b",
     r"(?i)\b(?:up to|as much as|over)\s+\d+(?:\.\d+)?\s*(?:%|percent|x\b)",
     r"(?i)\bsaves?\s+(?:you\s+)?\d+(?:\.\d+)?\s*(?:%|percent|hours|days|weeks)\b",
+    # Money. "batching 10 requests saves $0.06 per hour on an RTX 3080" is a
+    # benchmark nobody ran, and a costing claim invites someone to hold you to
+    # it. Prices traceable to proof_points still pass via _cited_number.
+    r"(?i)(?:saves?|costs?|cuts?|reduces?)\s+(?:you\s+)?[$£€]\s?\d",
+    r"(?i)[$£€]\s?\d+(?:\.\d+)?\s*(?:per|/|a)\s*(?:hour|hr|month|year|day|"
+    r"request|token|1k|million)",
 ]
 
 # Hedged or self-measured framings are acceptable - they make no claim about a
@@ -164,9 +170,33 @@ def _cited_number(match: str, brand: Brand) -> bool:
     return bool(nums) and all(n in corpus for n in nums)
 
 
+# A company account inventing a personal war story. The radar's reply policy
+# has blocked this since it was written; posts never did, and a live run opened
+# a Vallorix tweet with "I once spent hours tracking a mystery daemon crash".
+# It reads as a lie because it is one - nobody at the company did that.
+FABRICATED_ANECDOTE = [
+    (r"(?i)\bI (?:once|recently|just)\s+(?:spent|found|tried|built|debugged|"
+     r"discovered|hit|ran into|chased)\b", "fabricated_anecdote"),
+    (r"(?i)\b(?:last|this)\s+(?:week|month|night|year)\s+I\s+\w+", "fabricated_anecdote"),
+    (r"(?i)\bI\s+(?:remember|learned this the hard way|got burned)\b", "fabricated_anecdote"),
+    (r"(?i)\ba client of (?:mine|ours)\b", "fabricated_anecdote"),
+]
+
+
 # Claims nobody may make on either brand - unverifiable social proof.
 UNVERIFIABLE = [
     (r"(?i)\b(?:trusted|used) by (?:\d[\d,]*\+?|thousands|hundreds|millions|top)\b", "social_proof"),
+    # "40% of our users batch inference requests" scored 8.0 and shipped past
+    # the old rule, which required the number to sit immediately before the
+    # noun. A proportion-of-customers claim is a survey result nobody ran, and
+    # on a commercial account it is a false-advertising problem rather than
+    # just a credibility one.
+    (r"(?i)\b\d+\s*(?:%|percent)\s+of\s+(?:our|the|all|inferix'?s?|vallorix'?s?)?\s*"
+     r"(?:users|customers|teams|developers|companies|clients|accounts)\b",
+     "invented_user_statistic"),
+    (r"(?i)\b(?:most|many|half|a (?:third|quarter)|\d+ in \d+)\s+of\s+(?:our|my)\s+"
+     r"(?:users|customers|teams|developers|companies|clients)\b",
+     "invented_user_statistic"),
     (r"(?i)\b\d[\d,]*\+?\s+(?:happy\s+)?(?:customers|users|teams|developers|companies)\b", "user_counts"),
     (r"(?i)(?:#1|\bnumber one\b|\bthe leading\b|\bmarket[- ]leading\b|"
      r"\bbest[- ]in[- ]class\b)", "superlative_claim"),
@@ -240,6 +270,17 @@ def check(text: str, brand: Brand, ps: PlatformSpec) -> list[Violation]:
         m = re.search(pat, stripped)
         if m:
             v.append(Violation("BLOCK", code, f"unverifiable claim: {m.group(0)!r}"))
+
+    for pat, code in FABRICATED_ANECDOTE:
+        m = re.search(pat, stripped)
+        if m:
+            v.append(
+                Violation(
+                    "BLOCK", code,
+                    f"first-person anecdote on a brand account: {m.group(0)!r} - "
+                    f"nobody at the company did this",
+                )
+            )
 
     # --- invented benchmarks ----------------------------------------------
     for pat in FABRICATED_METRIC:

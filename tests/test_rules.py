@@ -187,3 +187,71 @@ def test_antithesis_cliche_is_flagged_in_both_forms(inferix):
     ]:
         violations = rules.check(text + " https://inferix.co", inferix, spec("x"))
         assert any(v.code == "antithesis_cliche" for v in violations), text
+
+
+# --- caught only by running it for real -------------------------------------
+# All three shipped past the gate at score 8.0 in a live batch.
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "40% of our users batch inference requests to minimize their GPU costs.",
+        "Most of our customers batch requests to cut spend on rented hardware.",
+        "3 in 4 of our teams hit this ceiling before they change hardware.",
+    ],
+)
+def test_invented_user_statistics_are_blocked(text, inferix):
+    """A proportion-of-customers claim is a survey nobody ran.
+
+    "40% of our users batch inference requests" scored 8.0 and passed. The old
+    rule required the number to sit immediately before the noun. On a
+    commercial account this is a false-advertising problem, not just a
+    credibility one.
+    """
+    assert "invented_user_statistic" in codes(text, inferix, "linkedin")
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Batching 10 requests saves $0.06 per hour on a mid-range card.",
+        "Inference runs about $0.40 per hour on that tier for most workloads.",
+        "This cuts $200 a month off a typical training budget for small teams.",
+    ],
+)
+def test_invented_costs_are_blocked(text, inferix):
+    """A costing claim invites someone to hold you to it."""
+    assert "fabricated_metric" in codes(text, inferix, "linkedin")
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "I once spent hours tracking a mystery daemon crash before finding it.",
+        "Last week I traced an auth failure through three layers of journals.",
+        "I learned this the hard way after an access review went sideways.",
+        "A client of ours hit this during their first surveillance audit.",
+    ],
+)
+def test_first_person_anecdotes_are_blocked_on_a_brand_account(text, vallorix):
+    """Nobody at the company did this - it reads as a lie because it is one.
+
+    The radar's reply policy has blocked invented personal stories since it was
+    written; posts never did, and a live run opened a Vallorix tweet with
+    "I once spent hours tracking a mystery daemon crash".
+    """
+    assert "fabricated_anecdote" in codes(text, vallorix, "x")
+
+
+def test_real_technical_content_still_passes(inferix, vallorix):
+    """The new rules must not suppress the posts that are actually good."""
+    assert codes(
+        "A 7B model in fp16 is about 14GB of weights before any KV cache is "
+        "allocated, which is why a 16GB card dies at long context.",
+        inferix, "linkedin",
+    ) == []
+    assert codes(
+        "For A.8.5 secure authentication auditors want logs of every privileged "
+        "access attempt, not a checkbox confirming MFA is enabled. #grc #iso27001",
+        vallorix, "linkedin",
+    ) == []
