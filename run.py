@@ -135,22 +135,39 @@ def main() -> int:
         from adforge.platforms.oauth_helper import (SETUP_STEPS, print_result,
                                                     youtube_auth)
 
-        if args.auth.lower() != "youtube":
-            print(f"no OAuth helper for {args.auth!r}. Supported: youtube")
-            print("\nThe others take credentials you can copy directly:\n"
-                  "  reddit    old.reddit.com/prefs/apps -> create app -> script\n"
-                  "  x         developer.x.com -> your app -> Keys and tokens\n"
-                  "  linkedin  linkedin.com/developers -> your app -> Auth\n"
-                  "  meta      developers.facebook.com -> your app -> Graph API Explorer\n"
-                  "  discord   a channel webhook URL, or a bot token\n"
-                  "  slack     api.slack.com/apps -> OAuth & Permissions")
-            return 1
-        if not (args.client_id or args.secrets_file):
-            print(SETUP_STEPS)
-            return 1
-        creds = youtube_auth(args.client_id, args.client_secret, args.secrets_file)
-        print_result("YouTube", creds)
-        return 0
+        from adforge.platforms.oauth_flows import FLOWS
+
+        want = args.auth.lower()
+
+        if want == "youtube":
+            if not (args.client_id or args.secrets_file):
+                print(SETUP_STEPS)
+                return 1
+            creds = youtube_auth(args.client_id, args.client_secret,
+                                 args.secrets_file)
+            print_result("YouTube", creds)
+            return 0
+
+        if want in FLOWS:
+            fn, setup = FLOWS[want]
+            if not (args.client_id and args.client_secret):
+                print(setup)
+                return 1
+            creds = fn(args.client_id, args.client_secret)
+            print_result(want.title(), creds)
+            return 0
+
+        print(f"no OAuth flow for {args.auth!r}.")
+        print("\nWith a helper:  youtube, linkedin, meta (facebook+instagram), tiktok")
+        print("\nCopy directly from the platform:\n"
+              "  reddit    old.reddit.com/prefs/apps -> create app -> type SCRIPT\n"
+              "            the client_id is the unlabelled string under the app name\n"
+              "  x         developer.x.com -> your app -> Keys and tokens\n"
+              "            set the app to Read+Write BEFORE generating the token\n"
+              "  discord   a channel webhook URL (Edit Channel -> Integrations),\n"
+              "            or a bot token from discord.com/developers\n"
+              "  slack     api.slack.com/apps -> OAuth & Permissions -> Bot token")
+        return 1
 
     if args.worker:
         import time
