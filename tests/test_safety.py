@@ -282,3 +282,48 @@ def test_enabling_an_account_never_goes_live_by_inheritance(monkeypatch, tmp_pat
     # An explicit LIVE choice is still honoured.
     acct.dry_run = False
     assert is_dry(acct) is False
+
+
+def test_unattended_detection_requires_all_four_settings(monkeypatch, tmp_path):
+    """Only warn when review=0 AND enabled AND AUTO AND actually transmitting.
+
+    Those four live on three different pages, so nothing showed them lining up.
+    Warning on any subset would be noise and get ignored.
+    """
+    import importlib
+
+    from adforge.config import settings as cfg
+
+    cfg.db_url = f"sqlite:///{tmp_path}/t.db"
+    import adforge.db as db
+
+    importlib.reload(db)
+    db.init_db()
+    import adforge.ui.app as ui
+
+    importlib.reload(ui)
+
+    with db.session_scope() as s:
+        s.add(db.Schedule(brand="inferix", platform="x", enabled=True,
+                          posts_per_day=1, days_of_week="0,1,2,3,4",
+                          times="09:00", pillars="tips"))
+        s.add(db.Account(brand="inferix", platform="x", enabled=True,
+                         dry_run=False, mode=db.PostMode.AUTO,
+                         credentials="{}", options="{}"))
+
+    monkeypatch.setattr(cfg, "review_window_minutes", 0)
+    assert ui._unattended(), "all four conditions met but nothing reported"
+    assert "tips" in ui._unattended()[0]
+
+    # Any one of them absent means attended, so no warning.
+    monkeypatch.setattr(cfg, "review_window_minutes", 60)
+    assert ui._unattended() == []
+
+    monkeypatch.setattr(cfg, "review_window_minutes", 0)
+    with db.session_scope() as s:
+        s.query(db.Account).update({"dry_run": True})
+    assert ui._unattended() == [], "a dry-run account is not unattended publishing"
+
+    with db.session_scope() as s:
+        s.query(db.Account).update({"dry_run": False, "mode": db.PostMode.MANUAL})
+    assert ui._unattended() == [], "MANUAL always waits for a human"

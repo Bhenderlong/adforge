@@ -39,6 +39,21 @@
      and are happy with them.</div>
 
   <div class="grid g2" style="margin-top:14px">
+    {% if unattended %}
+    <div class="note bad">
+      <p><strong>These destinations now publish with no human involvement:</strong>
+         {{ unattended|join('; ') }}.</p>
+      <p>Review window 0, account enabled, AUTO mode, transmitting for real —
+         four settings on three different pages. That is what hands-off means
+         and it is a legitimate choice, but the pillars named above assert
+         things about hardware and inference that <em>no gate can verify</em>.
+         The factcheck flags what it believes is wrong; that is one model's
+         opinion of another's output, and it is neither complete nor always
+         right. A minute or two of review window is the cheapest insurance
+         here.</p>
+    </div>
+    {% endif %}
+
     <div class="field">
       <label>Review window (minutes)</label>
       <input type="number" name="set_review_window_minutes" min="0" max="10080"

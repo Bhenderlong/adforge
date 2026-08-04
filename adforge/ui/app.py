@@ -47,7 +47,8 @@ from ..db import (
 )
 from ..llm.client import health as llm_health
 from ..media import comfy
-from ..platforms.registry import ADAPTERS, account_status, publish_post
+from ..platforms.registry import (ADAPTERS, account_status, is_dry,
+                                  publish_post)
 from ..platforms.spec import SPECS, VIDEO_FIRST, spec
 from ..scheduler.engine import build_scheduler, plan_ahead, promote_and_publish
 from ..scheduler.planner import plan_slots, tz
@@ -1235,6 +1236,45 @@ def brand_save(key: str, content: str = Form(...)):
 # ---------------------------------------------------------------------------
 
 
+# Pillars whose posts assert things no gate can check - hardware behaviour,
+# inference characteristics, cost arithmetic. The factcheck flags what it
+# believes is wrong, but that is one model's opinion of another's output.
+UNATTENDED_RISK_PILLARS = {"tips", "cost", "ai_news"}
+
+
+def _unattended() -> list[str]:
+    """Destinations that would publish with no human involvement at all.
+
+    Enabled account, AUTO mode, actually transmitting, and a review window of
+    zero. The combination is legitimate - it is what hands-off means - but each
+    setting lives on a different page, so nothing shows the four of them
+    lining up.
+    """
+    if settings.review_window_minutes > 0:
+        return []
+    out = []
+    with session_scope() as s:
+        for sched in s.query(Schedule).filter(Schedule.enabled.is_(True)).all():
+            acct = (
+                s.query(Account)
+                .filter_by(brand=sched.brand, platform=sched.platform)
+                .first()
+            )
+            if not (acct and acct.enabled and acct.mode == PostMode.AUTO):
+                continue
+            if is_dry(acct):
+                continue
+            pillars = set(sched.pillar_list()) or {
+                p.key for p in get_brand(sched.brand).pillars
+            }
+            risky = pillars & UNATTENDED_RISK_PILLARS
+            label = f"{sched.brand}/{sched.platform}"
+            if risky:
+                label += f" (incl. {', '.join(sorted(risky))})"
+            out.append(label)
+    return out
+
+
 @app.get("/settings", response_class=HTMLResponse)
 def settings_page(request: Request):
     from ..llm.client import available_models
@@ -1244,6 +1284,7 @@ def settings_page(request: Request):
     return templates.TemplateResponse(
         request, "settings.html",
         ctx(request, overrides=overrides, models=available_models(),
+            unattended=_unattended(),
             checkpoints=comfy.checkpoints(), unets=comfy.unet_models(),
             vaes=comfy.list_options("VAELoader", "vae_name"),
             clips=comfy.list_options("CLIPLoader", "clip_name"),
