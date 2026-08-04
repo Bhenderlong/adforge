@@ -357,3 +357,35 @@ def test_not_reported_is_distinguishable_from_zero_engagement():
     genuine = Stats.of(impressions=0, likes=0)
     assert silent["fetched"] is False and genuine["fetched"] is True
     assert silent["impressions"] == genuine["impressions"] == 0
+
+
+# --- route ordering ---------------------------------------------------------
+
+def test_no_shadowed_routes():
+    """A parameterised route declared first swallows its literal siblings.
+
+    /schedules/{sched_id} was declared above /schedules/plan-now and
+    /schedules/tick, so FastAPI parsed "plan-now" as an id and both buttons
+    returned "Input should be a valid integer". Neither had ever worked, and
+    nothing failed loudly enough to notice.
+    """
+    import re
+
+    from adforge.ui.app import app
+
+    routes = [
+        (r.path, sorted(getattr(r, "methods", set()) - {"HEAD"}))
+        for r in app.routes
+        if hasattr(r, "path") and getattr(r, "methods", None)
+    ]
+    seen_param, shadowed = [], []
+    for path, methods in routes:
+        if "{" in path:
+            seen_param.append((path, methods))
+            continue
+        for ppath, pmethods in seen_param:
+            if set(methods) & set(pmethods) and re.fullmatch(
+                re.sub(r"\{[^}]+\}", "[^/]+", ppath), path
+            ):
+                shadowed.append(f"{path} is unreachable behind {ppath}")
+    assert not shadowed, "; ".join(shadowed)

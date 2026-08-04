@@ -772,6 +772,28 @@ def schedules(request: Request):
     )
 
 
+# Declared BEFORE /schedules/{sched_id}. FastAPI matches in declaration order,
+# so a parameterised route listed first swallows every literal sibling: with
+# {sched_id} above, "plan-now" and "tick" were parsed as ids and both buttons
+# returned "Input should be a valid integer" instead of doing anything. Neither
+# had ever worked. test_no_shadowed_routes guards the ordering.
+@app.post("/schedules/plan-now")
+def schedule_plan_now():
+    _job("plan", plan_ahead)
+    return RedirectResponse("/schedules", status_code=303)
+
+
+@app.post("/schedules/tick")
+def schedule_tick():
+    _job("publish-tick", promote_and_publish)
+    return RedirectResponse("/queue", status_code=303)
+
+
+# ---------------------------------------------------------------------------
+# Accounts
+# ---------------------------------------------------------------------------
+
+
 @app.post("/schedules/{sched_id}")
 def schedule_save(
     sched_id: int,
@@ -799,23 +821,6 @@ def schedule_save(
         sched.pillars = ",".join(pillars)
         sched.attach_media = bool(attach_media)
     return RedirectResponse("/schedules", status_code=303)
-
-
-@app.post("/schedules/plan-now")
-def schedule_plan_now():
-    _job("plan", plan_ahead)
-    return RedirectResponse("/schedules", status_code=303)
-
-
-@app.post("/schedules/tick")
-def schedule_tick():
-    _job("publish-tick", promote_and_publish)
-    return RedirectResponse("/queue", status_code=303)
-
-
-# ---------------------------------------------------------------------------
-# Accounts
-# ---------------------------------------------------------------------------
 
 
 @app.get("/accounts", response_class=HTMLResponse)
