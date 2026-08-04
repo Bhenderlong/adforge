@@ -76,6 +76,15 @@ AI_TELLS = [
     r"\bthrilled to (?:announce|share)\b",
     r"\bproud to announce\b",
     r"\bwe'?re on a mission to\b",
+    # Motivational filler. A real short's caption survived every gate with
+    # "train smarter, not harder! scaling your ai projects just got easier" -
+    # two sentences that say nothing and could sit under any product on earth.
+    r"(?i)\b(?:work|train|build|scale|ship)\s+smarter,?\s+not\s+harder\b",
+    r"(?i)\bjust got (?:easier|simpler|better|faster)\b",
+    r"(?i)\btake the guesswork out of\b",
+    r"(?i)\bmade (?:easy|simple)\b",
+    r"(?i)\bthe smart way to\b",
+    r"(?i)\blevel up your\b",
 ]
 
 # "It's not X, it's Y" and em-dash-heavy antithesis are the most recognisable
@@ -203,6 +212,36 @@ UNVERIFIABLE = [
     (r"(?i)\b(?:\d+x|\d+%)\s+(?:faster|cheaper|better)\s+than\s+\w+", "unbenchmarked_comparison"),
     (r"(?i)\bbacked by\b[^.!?]{0,30}\b(?:vc|investors|ycombinator|y combinator)\b", "funding_claim"),
 ]
+
+
+# Hashtags are matched as one token, so a typo is a tag nobody follows and the
+# post reaches nobody through it. A real caption shipped "#gpucould". Checking
+# every word against a dictionary would be overreach; checking that a tag built
+# from the brand's own vocabulary is spelled the way the brand spells it is not.
+def _misspelt_hashtags(text: str, brand: Brand) -> list[str]:
+    import difflib
+
+    vocab = set()
+    for kw in brand.keywords:
+        # Both the individual words AND the concatenated form, because that is
+        # how a multi-word keyword becomes a hashtag: "GPU cloud" -> #gpucloud.
+        # Splitting only gave {gpu, cloud}, so the compound tag was never in
+        # the vocabulary and "#gpucould" had nothing close to match against.
+        vocab |= {re.sub(r"[^a-z0-9]", "", w.lower()) for w in kw.split()}
+        vocab.add(re.sub(r"[^a-z0-9]", "", kw.lower()))
+    vocab.add(re.sub(r"[^a-z0-9]", "", brand.name.lower()))
+    vocab = {v for v in vocab if len(v) > 3}
+
+    bad = []
+    for tag in re.findall(r"(?<!\w)#(\w+)", text):
+        low = tag.lower()
+        if low in vocab:
+            continue
+        # Only flag a near-miss: one edit away from a word the brand uses.
+        close = difflib.get_close_matches(low, vocab, n=1, cutoff=0.86)
+        if close and close[0] != low:
+            bad.append(f"#{tag} (did you mean #{close[0]}?)")
+    return bad
 
 
 def _hashtag_count(text: str) -> int:
@@ -338,6 +377,12 @@ def check(text: str, brand: Brand, ps: PlatformSpec) -> list[Violation]:
         v.append(Violation("BLOCK", "too_many_hashtags", f"{n} > {hi} for {ps.label}"))
     elif n < lo:
         v.append(Violation("WARN", "too_few_hashtags", f"{n} < {lo} for {ps.label}"))
+
+    for bad in _misspelt_hashtags(stripped, brand):
+        v.append(
+            Violation("BLOCK", "misspelt_hashtag",
+                      f"{bad} - a mistyped tag is followed by nobody")
+        )
 
     if _emoji_count(stripped) > 4:
         v.append(Violation("WARN", "emoji_spam", "more than 4 emoji"))

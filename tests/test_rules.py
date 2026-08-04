@@ -255,3 +255,39 @@ def test_real_technical_content_still_passes(inferix, vallorix):
         "access attempt, not a checkbox confirming MFA is enabled. #grc #iso27001",
         vallorix, "linkedin",
     ) == []
+
+
+# --- from the first full short ----------------------------------------------
+# Its caption passed every gate: "train smarter, not harder! scaling your ai
+# projects just got easier #aidevelopment #gpucould #inferix ..."
+
+@pytest.mark.parametrize(
+    "phrase",
+    ["train smarter, not harder", "just got easier", "take the guesswork out of",
+     "made easy", "the smart way to", "level up your"],
+)
+def test_motivational_filler_is_blocked(phrase, inferix):
+    """Two sentences that could sit under any product on earth."""
+    text = f"Scaling inference {phrase} for teams that ship. #gpucloud #ml #vllm"
+    assert "ai_tell" in codes(text, inferix, "tiktok")
+
+
+@pytest.mark.parametrize(
+    "tag,brand_name",
+    [("gpucould", "inferix"), ("complianceautomaton", "vallorix")],
+)
+def test_mistyped_hashtags_are_blocked(tag, brand_name, inferix, vallorix):
+    """A typo'd tag is followed by nobody, so the post reaches nobody through it."""
+    brand = inferix if brand_name == "inferix" else vallorix
+    text = (f"Concrete technical detail that stands on its own merits here. "
+            f"#{tag} #ml #devops")
+    assert "misspelt_hashtag" in codes(text, brand, "tiktok")
+
+
+def test_correctly_spelled_and_unrelated_hashtags_pass(inferix):
+    """Only near-misses of the brand's own vocabulary are flagged."""
+    assert codes(
+        "A 7B in fp16 is 14GB of weights before any KV cache is allocated. "
+        "#gpucloud #kvcache #quantization",
+        inferix, "tiktok",
+    ) == []
