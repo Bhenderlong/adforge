@@ -291,3 +291,35 @@ def test_correctly_spelled_and_unrelated_hashtags_pass(inferix):
         "#gpucloud #kvcache #quantization",
         inferix, "tiktok",
     ) == []
+
+
+# --- subject-dropped anecdotes ----------------------------------------------
+# Ordinary tweet style drops the pronoun, and every "I ..." pattern missed it.
+# A real thread opened "Ran a 5B sparse model on a 16GB GPU and watched it die".
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Ran a 5B sparse model on a 16GB GPU and watched it die on long context.",
+        "Tested this on a 24GB card last week and the cache spilled immediately.",
+        "Deployed it to production and the latency doubled within the hour.",
+        "Turns out parameter density kills KV cache size more than expected.",
+        "Benchmarked the same model on two cards and the gap was not the FLOPs.",
+    ],
+)
+def test_anecdotes_without_a_pronoun_are_blocked(text, inferix):
+    assert "fabricated_anecdote" in codes(text, inferix, "x")
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "A 7B model in fp16 is 14GB of weights before any KV cache is allocated.",
+        "Continuous batching raises throughput until the cache stops fitting.",
+        "The scheduler ran a compaction pass, which is why latency spiked.",
+        "Quantizing to int8 roughly halves the bytes per parameter you store.",
+    ],
+)
+def test_ordinary_technical_prose_is_not_mistaken_for_an_anecdote(text, inferix):
+    """A gate that suppresses correct output is its own failure."""
+    assert codes(text, inferix, "x") == []

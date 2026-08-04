@@ -13,6 +13,7 @@ waiting on a 70B model.
 from __future__ import annotations
 
 import datetime as dt
+import json
 import logging
 import random
 import uuid
@@ -21,7 +22,8 @@ import zoneinfo
 from ..brands import get_brand
 from ..config import settings
 from ..db import Post, PostMode, PostStatus, Schedule, utcnow
-from ..llm.copywriter import media_prompt, write_post
+from ..llm.copywriter import (extract_hashtags, media_prompt, write_post,
+                              write_thread)
 from ..platforms.spec import VIDEO_FIRST, spec
 
 log = logging.getLogger("adforge.plan")
@@ -205,6 +207,22 @@ def fill_slot(
 
     if ps.key in ("reddit", "youtube"):
         post.title = _headline(brand, draft.text, ps)
+
+    # X threads. The adapter has always chained extra_parts into a real thread,
+    # but nothing ever produced any, so a mechanism that needs 600 characters
+    # got 280 and was cut off at the interesting part.
+    if ps.key == "x" and draft.passed:
+        try:
+            head, parts = write_thread(brand, ps, pillar, draft.text, draft.angle)
+            if parts:
+                # The body becomes the thread's OWN first tweet. Keeping the
+                # original opener would leave the continuations following a
+                # tweet nobody sees.
+                post.body = head
+                post.hashtags = ",".join(extract_hashtags(head))
+                post.extra_parts = json.dumps(parts)
+        except Exception as e:  # noqa: BLE001 - a thread is a bonus, not the post
+            log.warning("thread generation failed for %s: %s", sched_brand, e)
 
     # Media is generated BEFORE the insert, for the same reason: rendering a
     # video with the row already flushed would hold the write lock for the

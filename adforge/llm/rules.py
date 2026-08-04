@@ -189,6 +189,16 @@ FABRICATED_ANECDOTE = [
     (r"(?i)\b(?:last|this)\s+(?:week|month|night|year)\s+I\s+\w+", "fabricated_anecdote"),
     (r"(?i)\bI\s+(?:remember|learned this the hard way|got burned)\b", "fabricated_anecdote"),
     (r"(?i)\ba client of (?:mine|ours)\b", "fabricated_anecdote"),
+    # Subject-dropped first person, which is ordinary tweet style and slipped
+    # every pattern above: "Ran a 5B sparse model on a 16GB GPU and watched it
+    # die." No "I", same fabricated war story. Anchored to the start of the
+    # text or a sentence so it does not fire on "Ran" mid-clause.
+    (r"(?i)(?:^|[.!?]\s+)(?:ran|tried|spent|built|debugged|tested|deployed|"
+     r"benchmarked|watched|hit|chased|swapped)\s+"
+     r"(?:a|an|the|our|my|this|that|these|those|it|\d)\b",
+     "fabricated_anecdote"),
+    (r"(?i)(?:^|[.!?]\s+)(?:turns out|learned that|found out)\b",
+     "fabricated_anecdote"),
 ]
 
 

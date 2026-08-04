@@ -84,6 +84,7 @@
         {% if p.title %}<strong>{{ p.title[:90] }}</strong><br>{% endif %}
         <span class="truncate">{{ p.body[:200] }}</span>
         {% if p.error %}<br><span class="pill bad" title="{{ p.error }}">error</span>{% endif %}
+        {% if p.parts() %}<br><span class="pill info">thread +{{ p.parts()|length }}</span>{% endif %}
         {# A degraded render or a below-bar score is only visible on the detail
            page otherwise, which means a queue scan misses it entirely. #}
         {% if p.critic_notes %}

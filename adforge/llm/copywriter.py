@@ -296,6 +296,70 @@ def _write_post(brand, ps, pillar, angle, recent, rng) -> Draft:
     return best
 
 
+def write_thread(
+    brand: Brand, ps: PlatformSpec, pillar: Pillar, opener: str, angle: str
+) -> tuple[str, list[str]]:
+    """Continuation tweets for an X thread, or [] to post the single tweet.
+
+    The X adapter has always chained `extra_parts` into a real thread, but
+    nothing ever produced any, so every post was a lone tweet regardless of
+    whether the idea fitted. 280 characters cannot carry a mechanism, which is
+    the whole point of the `tips` and `cost` pillars.
+
+    Returns (opening_tweet, continuations). The opener is returned as well as
+    taken, because the model writes a COMPLETE thread with its own first tweet
+    and the continuations are written to follow THAT one. Keeping the original
+    opener and appending their tweets 2-n orphans the continuations: a real run
+    produced an opener about verified GPU capacity followed by "Too small,
+    kernel overhead dominates" - a continuation of a sentence that was thrown
+    away. Either the whole thread is used or none of it is.
+
+    Each part is gated exactly like a standalone post - a thread is published
+    copy and the same fabrications matter in tweet 4 as in tweet 1.
+    """
+    try:
+        with gpu(TEXT):
+            data = chat_json(
+                prompts.thread_prompt(brand, pillar, angle, opener),
+                models=settings.writer_chain,
+                temperature=0.8,
+                max_tokens=1200,
+            )
+    except LLMError as e:
+        log.warning("thread generation failed, posting a single tweet: %s", e)
+        return opener, []
+
+    if not data.get("needs_thread"):
+        return opener, []
+
+    tweets = [_clean(str(x)) for x in data.get("tweets", []) if str(x).strip()]
+    if len(tweets) < 2:
+        return opener, []
+
+    # Every tweet is gated, tweet 1 included - it becomes the post body.
+    checked: list[str] = []
+    for tweet in tweets[:5]:
+        if len(tweet) > ps.max_chars:
+            log.info("thread tweet over %d chars, cutting the thread here",
+                     ps.max_chars)
+            break
+        blockers = rules.blocking(rules.check(tweet, brand, ps))
+        if blockers:
+            log.info("thread tweet rejected (%s), cutting the thread here",
+                     blockers[0].code)
+            break
+        checked.append(tweet)
+
+    # A thread whose opener failed the gate is not a thread. Fall back to the
+    # single vetted tweet rather than publishing a truncated fragment.
+    if len(checked) < 2:
+        log.info("thread did not survive the gate, posting a single tweet")
+        return opener, []
+
+    log.info("thread: %d tweets", len(checked))
+    return checked[0], checked[1:]
+
+
 def media_prompt(brand: Brand, post_text: str, angle: str) -> str:
     """Turn a post into an image prompt unique to that post."""
     vis = brand.visual

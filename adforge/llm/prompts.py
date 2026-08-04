@@ -360,3 +360,50 @@ specific. Output only the rewritten post."""
         {"role": "system", "content": HOUSE_STYLE},
         {"role": "user", "content": user},
     ]
+
+
+THREAD_SYSTEM = """\
+You expand one idea into a short X thread. A thread earns its length or it does
+not exist - if the idea fits in one tweet, say so and produce one.
+
+Rules:
+- Tweet 1 must stand completely on its own. Most readers see only that one, and
+  it is what makes anyone tap through. Never open with "a thread:" or a number.
+- Every tweet is at most 270 characters. That is a hard limit, not a target -
+  going over means the whole thread is discarded.
+- Each tweet advances the idea. No restating, no throat-clearing, no "let me
+  explain".
+- 3 to 5 tweets. Beyond that the completion rate collapses.
+- Only the LAST tweet may carry the link, and only if the reader has been given
+  something useful first.
+- No hashtags except at most one, in the last tweet.
+- No numbering ("1/5"). It caps expectations and adds nothing.
+
+Reply with ONLY JSON:
+{"needs_thread": true|false, "tweets": ["...", "..."]}
+
+Set needs_thread false and return a single tweet when the idea does not have
+enough substance to justify more.
+"""
+
+
+def thread_prompt(brand: Brand, pillar: Pillar, angle: str, opener: str) -> list[dict]:
+    user = f"""{_brand_block(brand)}
+
+PILLAR: {pillar.label}
+THE IDEA: {angle}
+
+An opening tweet has already been drafted:
+---
+{opener}
+---
+
+Decide whether this idea genuinely needs more than one tweet. If it does,
+produce the full thread STARTING with a first tweet (you may keep or improve
+the draft above). If it does not, return that single tweet.
+
+Every tweet must be under 270 characters."""
+    return [
+        {"role": "system", "content": THREAD_SYSTEM},
+        {"role": "user", "content": user},
+    ]

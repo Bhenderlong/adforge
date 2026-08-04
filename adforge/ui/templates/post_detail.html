@@ -54,6 +54,23 @@
         <div class="hint">{{ ps.register }}</div>
       </div>
 
+      {% if post.parts() %}
+      <div class="field">
+        <label>Thread <span class="faint">({{ post.parts()|length }} continuation
+          tweet(s), posted as replies)</span></label>
+        {% for part in post.parts() %}
+          <div class="card tight" style="margin-bottom:6px">
+            <span class="faint mono">{{ loop.index + 1 }}/{{ post.parts()|length + 1 }}</span>
+            <span class="faint">· {{ part|length }} chars</span>
+            <p style="margin:4px 0 0">{{ part }}</p>
+          </div>
+        {% endfor %}
+        <div class="hint">Edit the thread by editing this post's
+          <code class="mono">extra_parts</code> — not yet editable here, so
+          reject and regenerate if a continuation is wrong.</div>
+      </div>
+      {% endif %}
+
       <div class="field">
         <label>Hashtags <span class="faint">(comma separated, no #)</span></label>
         <input type="text" name="hashtags" value="{{ post.hashtags }}">
