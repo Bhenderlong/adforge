@@ -127,9 +127,18 @@ visual:
     electric-blue accent light, subtle volumetric glow, crisp geometry.
     Datacenter and GPU hardware motifs, abstract compute topology, isometric
     server geometry. Sharp, high contrast, uncluttered, professional.
+  # Video-only. The still style says "abstract compute topology", which pushes
+  # SDXL toward textured wallpaper - fine as a backdrop behind a feed post,
+  # fatal for a short that has 1.5s to stop a scroll. This carries palette and
+  # lighting only, leaving the SUBJECT to the scene direction.
+  video_style: >
+    photographed on a dark bench, single hard key light from one side, cyan and
+    electric-blue rim light, deep near-black background, shallow depth of field,
+    sharp focus on the subject, product photography, high detail
   negative: >
     stock photo people, handshake, generic businessman, cheesy, cluttered,
-    watermark, text artifacts, garbled letters, low quality, blurry, oversaturated
+    watermark, text artifacts, garbled letters, low quality, blurry, oversaturated,
+    abstract pattern, wallpaper, texture, kaleidoscope, symmetrical tiling
   palette: ["#06b6d4", "#0ea5e9", "#0b1220", "#e2e8f0"]
 
 voice:

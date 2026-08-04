@@ -39,10 +39,99 @@ Rules that decide whether the video performs:
   cannot render legible words. No people's faces. No logos.
 - Never invent statistics or benchmark results.
 
+VISUAL DIRECTIONS - the single biggest failure mode:
+Every visual MUST name ONE concrete physical object as its subject, and that
+object must fill the frame. Abstract prompts produce dark textured wallpaper
+that nobody stops scrolling for.
+  BAD:  "abstract memory lattice filling with cyan light, layered depth"
+  BAD:  "compute topology, flowing data, volumetric glow"
+  GOOD: "a single graphics card standing upright on a dark bench, fans and
+         heatsink fins sharply lit from one side, shallow depth of field"
+  GOOD: "one open server chassis viewed from above, RAM sticks in a row,
+         cables running off frame"
+Name the object first, then how it is lit and framed. One object per scene,
+not a collection. Prefer real hardware you could photograph: a GPU, a fan
+stack, a rack rail, a cable bundle, a drive tray, a padlock, a filing drawer,
+a stamped document.
+
+NO NUMBERS, CAPACITIES OR BRAND NAMES in a visual direction. The image model
+tries to render any it sees as text on the object and produces garbled
+nonsense - "16GB graphics card" came back with a fake "166" stamped on the fan
+hub. Write "a graphics card", not "a 16GB graphics card"; "a GPU", not "an
+NVIDIA A100". Naming a real manufacturer's product is also a trademark problem you
+do not need. The number belongs in the CAPTION, which is real text rendered
+properly.
+
+FRAMING - this is a 9:16 vertical video with a caption bar across the bottom
+third. Put the subject in the UPPER TWO THIRDS of the frame and keep the lower
+third simple, or the caption will sit on top of the detail that matters.
+
 Reply with ONLY this JSON:
 {"title":"...","scenes":[{"caption":"<=8 words","visual":"image prompt",
 "motion":"camera move","seconds":number}],"hashtags":["...","..."]}
 """
+
+
+# Used when scrubbing leaves nothing usable. Deliberately plain: a clean
+# recognisable object beats an incoherent one.
+FALLBACK_SUBJECT = (
+    "a single graphics card standing upright on a dark bench, fans and "
+    "heatsink fins sharply lit from one side"
+)
+
+_UNIT_NUM = re.compile(
+    r"\b\d+\s*(?:gb|tb|mb|gib|tib|b|bit|w|watt|watts|hz|ghz|mhz|x|k)?\b",
+    re.I,
+)
+_BRANDS = re.compile(
+    r"\b(?:nvidia|geforce|rtx|gtx|amd|radeon|intel|arc|a100|h100|h200|"
+    r"v100|t4|l40s?|4090|4080|3090|5090|apple|m[1-4]\s*(?:pro|max|ultra)?)\b",
+    re.I,
+)
+
+
+def scrub_visual(prompt: str) -> str:
+    """Remove numbers and hardware brand names from an image prompt.
+
+    SDXL renders any digits or product names it sees as text ON the object,
+    and gets it wrong: "16GB graphics card" produced a card with a garbled
+    "166" stamped on the fan hub. The prompt asks the model not to include
+    them; this makes sure. The figure belongs in the caption, which is real
+    text drawn by Pillow.
+    """
+    out = _BRANDS.sub("", prompt)
+    out = _UNIT_NUM.sub("", out)
+
+    # Deleting words leaves orphans: "an RTX 4090 with 24GB VRAM" becomes
+    # "an with VRAM", which is a worse prompt than the original. Drop articles
+    # and quantifiers that no longer have a noun to attach to.
+    out = re.sub(
+        r"\b(?:a|an|the|one|single)\s+(?=(?:with|and|or|beside|on|in|of|at|"
+        r"for|from|to|by)\b)",
+        "",
+        out,
+        flags=re.I,
+    )
+    out = re.sub(r"\s{2,}", " ", out)
+    out = re.sub(r"\s+([,.])", r"\1", out)
+    out = re.sub(r"(?:,\s*){2,}", ", ", out)
+    # A leading connective is left over when the subject itself was the thing
+    # removed ("an RTX 4090 with 24GB" -> "with VRAM").
+    out = re.sub(
+        r"^(?:with|and|or|beside|on|in|of|at|for|from|to|by)\s+", "", out.strip(" ,."),
+        flags=re.I,
+    ).strip(" ,.")
+
+    # If the direction was mostly numbers and product names there is nothing
+    # coherent left, and word salad makes a worse image than a plain subject.
+    # Say so in the log rather than silently rendering something odd.
+    if len(out) < 25:
+        log.warning(
+            "visual direction was almost entirely numbers/brands (%r) - "
+            "falling back to a generic subject", prompt[:80]
+        )
+        return FALLBACK_SUBJECT
+    return out
 
 
 def _sanitize(text: str) -> str:
@@ -63,7 +152,11 @@ def write_script(
     # longer loses the scroll. Cap the count so render time stays sane.
     n_scenes = max(3, min(8, round(target / 4.5)))
 
-    style = brand.visual.get("style", "").strip()
+    # Video uses video_style when the brand defines one: the still style's
+    # composition words ("abstract compute topology") fight the concrete
+    # subject a short needs.
+    style = (brand.visual.get("video_style")
+             or brand.visual.get("style", "")).strip()
     rules_block = ""
     if brand.hard_rules:
         rules_block = "\n!! ABSOLUTE RULES:\n" + "\n".join(
@@ -108,7 +201,7 @@ Write exactly {n_scenes} scenes totalling about {target} seconds."""
         scenes.append(
             Scene(
                 caption=cap,
-                visual=f"{vis}. {style}",
+                visual=f"{scrub_visual(vis)}. {style}",
                 seconds=max(2.0, min(8.0, secs)),
                 motion=str(s.get("motion") or "slow push in, subtle parallax"),
             )

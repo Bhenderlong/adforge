@@ -111,9 +111,16 @@ visual:
     controlled accent in steel blue and muted gold, architectural geometry,
     vault and shield motifs rendered abstractly, layered depth, precise lines.
     Serious, credible, understated. Reads as trustworthy infrastructure.
+  # See the note on inferix.video_style - palette and lighting only, subject
+  # comes from the scene direction.
+  video_style: >
+    photographed in low warm light, single soft key from one side, deep slate and
+    navy background, muted gold highlight, shallow depth of field, sharp focus on
+    the subject, editorial still life, high detail
   negative: >
     hoodie hacker, green matrix code, skull, padlock cliche, stock photo people,
-    cheesy, cluttered, watermark, text artifacts, garbled letters, low quality, blurry
+    cheesy, cluttered, watermark, text artifacts, garbled letters, low quality, blurry,
+    abstract pattern, wallpaper, texture, kaleidoscope, symmetrical tiling
   palette: ["#334155", "#1e293b", "#94a3b8", "#b8944d"]
 
 voice:

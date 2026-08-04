@@ -253,3 +253,64 @@ def test_switching_an_account_to_manual_holds_approved_posts(tmp_path):
         post = s.get(db.Post, pid)
         assert post.mode == db.PostMode.MANUAL
         assert post.status == db.PostStatus.REVIEW
+
+
+# --- video prompt scrubbing -------------------------------------------------
+# SDXL renders digits and product names as text ON the object and gets it
+# wrong: "16GB graphics card" came back with a garbled "166" on the fan hub.
+
+@pytest.mark.parametrize(
+    "prompt,gone",
+    [
+        ("one 16GB graphics card on a dark bench, hard key light", "16"),
+        ("a single NVIDIA A100 GPU on a dark bench, cyan rim light", "NVIDIA"),
+        ("an RTX 4090 beside a 500W power supply on a rack rail", "4090"),
+        ("the 5090 and a 500W PSU, 2x fans, on a rack rail", "5090"),
+    ],
+)
+def test_numbers_and_brands_are_stripped_from_visuals(prompt, gone):
+    from adforge.media.script import scrub_visual
+
+    assert gone.lower() not in scrub_visual(prompt).lower()
+
+
+def test_a_clean_visual_is_left_alone():
+    from adforge.media.script import scrub_visual
+
+    clean = "a graphics card standing upright on a dark bench, fans sharply lit"
+    assert scrub_visual(clean) == clean
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "one 16GB graphics card on a dark bench, hard key light",
+        "an RTX 4090 beside a 500W power supply on a rack rail",
+        "the 5090 and a 500W PSU, 2x fans, on a rack rail",
+    ],
+)
+def test_scrubbing_never_leaves_a_dangling_connective(prompt):
+    """Deleting the subject left prompts like 'an with VRAM beside a supply'."""
+    from adforge.media.script import scrub_visual
+
+    out = scrub_visual(prompt)
+    first = out.split()[0].lower()
+    assert first not in {"with", "and", "or", "beside", "on", "in", "of", "an", "a",
+                         "the"} or out.split()[1].lower() not in {
+        "with", "and", "or", "beside", "on", "in", "of"}
+
+
+def test_an_all_numbers_visual_falls_back_to_a_real_subject():
+    from adforge.media.script import FALLBACK_SUBJECT, scrub_visual
+
+    assert scrub_visual("RTX 4090 24GB 500W 2x") == FALLBACK_SUBJECT
+
+
+def test_video_style_is_preferred_over_the_still_style():
+    """The still style's 'abstract compute topology' produced wallpaper."""
+    from adforge.brands import get_brand
+
+    for key in ("inferix", "vallorix"):
+        vis = get_brand(key).visual
+        assert vis.get("video_style"), f"{key} has no video_style"
+        assert "abstract" not in vis["video_style"].lower()
