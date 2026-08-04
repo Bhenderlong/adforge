@@ -167,6 +167,13 @@ def scan_reddit(session, target: RadarTarget, creds: dict) -> int:
         ).first():
             continue
 
+        # Release the transaction before scoring. The dedupe query above
+        # autoflushes, so with a pending add the session holds a SQLite
+        # RESERVED lock - and _score_thread then blocks on the GPU lock, which
+        # a concurrent Wan render can hold for minutes. The publish tick would
+        # fail with "database is locked" for that whole time.
+        session.commit()
+
         verdict = _score_thread(
             target.brand, brand.about, submission.title, submission.selftext or ""
         )
@@ -209,6 +216,7 @@ def scan_reddit(session, target: RadarTarget, creds: dict) -> int:
                 rules_note=note[:390],
             )
         )
+        session.commit()
         found += 1
 
     return found
@@ -323,6 +331,7 @@ def scan_discord(session, target: RadarTarget, creds: dict) -> int:
         ).first():
             continue
 
+        session.commit()  # same reason as the reddit path above
         verdict = _score_thread(target.brand, brand.about, content[:200], content)
         relevance = float(verdict.get("relevance") or 0.0)
         if not verdict.get("useful_without_product", True):
@@ -347,6 +356,7 @@ def scan_discord(session, target: RadarTarget, creds: dict) -> int:
                 rules_note=note[:390],
             )
         )
+        session.commit()
         found += 1
 
     return found

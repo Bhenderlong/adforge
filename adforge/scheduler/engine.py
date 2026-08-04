@@ -37,7 +37,7 @@ from ..db import (
 )
 from ..platforms.base import PublishError
 from ..platforms.registry import publish_post
-from .planner import fill_slot, plan_slots, tz
+from .planner import fill_slot, plan_slots_detailed, slot_key, tz
 
 log = logging.getLogger("adforge.sched")
 
@@ -75,21 +75,20 @@ def plan_ahead(rng: random.Random | None = None) -> int:
             # from 20:00 onward in America/New_York.
             today_local = now.astimezone(tz()).date()
             for day in (today_local, today_local + dt.timedelta(days=1)):
-                for when in plan_slots(sched, day, rng):
+                for nominal, when in plan_slots_detailed(sched, day, rng):
                     if not (now < when <= horizon):
                         continue
-                    # One post per slot. A 30-minute window absorbs jitter
-                    # differences between planning runs without duplicating.
+                    # One post per NOMINAL slot, matched exactly.
+                    #
+                    # This used to be a +/-30 minute window around the jittered
+                    # time, which failed both ways: pinned times 20 minutes
+                    # apart collided so one slot silently never got a post, and
+                    # with jitter above 15 two planning runs could place the
+                    # same slot more than 30 minutes apart and produce two.
+                    key = slot_key(sched, nominal)
                     exists = (
                         session.query(Post.id)
-                        .filter(
-                            Post.brand == sched.brand,
-                            Post.platform == sched.platform,
-                            and_(
-                                Post.scheduled_for >= when - dt.timedelta(minutes=30),
-                                Post.scheduled_for <= when + dt.timedelta(minutes=30),
-                            ),
-                        )
+                        .filter(Post.slot_key == key)
                         .first()
                     )
                     if exists:
@@ -101,7 +100,8 @@ def plan_ahead(rng: random.Random | None = None) -> int:
                         break
 
                     try:
-                        post = fill_slot(session, sched, when, account, rng)
+                        post = fill_slot(session, sched, when, account,
+                                         rng, slot_key=key)
                         created += 1
                         log.info(
                             "planned %s/%s for %s (score %.1f, mode %s)",

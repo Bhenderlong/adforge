@@ -44,10 +44,10 @@ def _parse_hhmm(s: str) -> tuple[int, int] | None:
     return (h, m) if 0 <= h < 24 and 0 <= m < 60 else None
 
 
-def plan_slots(
+def plan_slots_detailed(
     sched: Schedule, day: dt.date, rng: random.Random | None = None
-) -> list[dt.datetime]:
-    """Local-time posting instants for one schedule on one day.
+) -> list[tuple[dt.datetime, dt.datetime]]:
+    """(nominal, jittered) instants for one schedule on one day.
 
     Returns timezone-aware datetimes in UTC, ready to store.
     """
@@ -81,13 +81,28 @@ def plan_slots(
     zone = tz()
     out = []
     for h, m in sorted(set(times))[:n]:
-        local = dt.datetime(day.year, day.month, day.day, h, m, tzinfo=zone)
+        nominal = dt.datetime(day.year, day.month, day.day, h, m, tzinfo=zone)
+        actual = nominal
         if sched.jitter_minutes:
-            local += dt.timedelta(
+            actual += dt.timedelta(
                 minutes=rng.randint(-sched.jitter_minutes, sched.jitter_minutes)
             )
-        out.append(local.astimezone(dt.timezone.utc))
+        out.append((nominal.astimezone(dt.timezone.utc),
+                    actual.astimezone(dt.timezone.utc)))
     return sorted(out)
+
+
+def slot_key(sched: Schedule, nominal: dt.datetime) -> str:
+    """Stable identity for one scheduled slot, independent of jitter."""
+    return (f"{sched.brand}/{sched.platform}/"
+            f"{nominal.astimezone(dt.timezone.utc).strftime('%Y-%m-%dT%H:%M')}")
+
+
+def plan_slots(
+    sched: Schedule, day: dt.date, rng: random.Random | None = None
+) -> list[dt.datetime]:
+    """Just the times posts go out, for previews and tests."""
+    return [actual for _, actual in plan_slots_detailed(sched, day, rng)]
 
 
 def recent_bodies(session, brand: str, platform: str, limit: int = 12) -> list[str]:
@@ -110,6 +125,7 @@ def fill_slot(
     when: dt.datetime,
     account=None,
     rng: random.Random | None = None,
+    slot_key: str = "",
 ) -> Post:
     """Generate one post for a planned slot. Slow: runs the writer and media."""
     rng = rng or random
@@ -134,7 +150,19 @@ def fill_slot(
     sched_brand, sched_platform = sched.brand, sched.platform
     attach_media = bool(sched.attach_media)
     account_id = account.id if account is not None else None
-    session.rollback()  # release the read transaction; nothing is pending yet
+
+    # COMMIT, not rollback. This used to be `session.rollback()` with the
+    # comment "nothing is pending yet" - true on the first slot only. The
+    # caller loops over slots on one session, so from the second slot onward
+    # the session holds the previous slot's flushed INSERT, and rolling back
+    # discarded it. A planning run reported creating five posts and persisted
+    # exactly one: the last. Near-term slots were the ones lost, and a run
+    # spanning two brands wiped the first brand's posts too.
+    #
+    # Committing releases the read transaction just as well, and has the
+    # better property that each post becomes durable as soon as it is made
+    # rather than riding on the whole run finishing.
+    session.commit()
 
     draft = write_post(brand, ps, pillar, recent=recent, rng=rng)
 
@@ -155,6 +183,7 @@ def fill_slot(
         quality_score=draft.score,
         critic_notes="; ".join(draft.problems[:6]),
         generation_meta=f'{{"angle": {draft.angle[:300]!r}, "attempts": {draft.attempts}}}',
+        slot_key=slot_key,
     )
 
     # A post that never cleared the quality bar always waits for a human,
@@ -190,7 +219,10 @@ def fill_slot(
             post.critic_notes = f"media failed: {str(e)[:200]}; {post.critic_notes}"
 
     session.add(post)
-    session.flush()
+    # Commit immediately so this post survives a later failure in the run, and
+    # so the write lock is held only for the insert rather than until the
+    # caller finishes every remaining slot.
+    session.commit()
     return post
 
 

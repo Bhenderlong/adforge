@@ -64,9 +64,9 @@
         {% if p.mode.value == 'MANUAL' %}<br><span class="faint">manual</span>{% endif %}
       </td>
       <td class="faint mono">
-        {{ p.scheduled_for.strftime('%d %b %H:%M') if p.scheduled_for else '—' }}
+        {{ p.scheduled_for|localtime or '—' }}
         {% if p.review_until and p.status.value == 'REVIEW' %}
-          <br><span title="Auto-approves at this time">⏱ {{ p.review_until.strftime('%H:%M') }}</span>
+          <br><span title="Auto-approves at this time">⏱ {{ p.review_until|localtime('%H:%M') }}</span>
         {% endif %}
       </td>
       <td>

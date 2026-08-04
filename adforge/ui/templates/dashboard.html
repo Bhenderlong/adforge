@@ -97,7 +97,7 @@
         <tbody>
         {% for p in upcoming %}
           <tr>
-            <td class="faint mono">{{ p.scheduled_for.strftime('%d %b %H:%M') if p.scheduled_for else '—' }}</td>
+            <td class="faint mono">{{ p.scheduled_for|localtime or '—' }}</td>
             <td><span class="faint">{{ p.brand }}</span><br>{{ p.platform }}</td>
             <td class="truncate">{{ p.body[:130] }}</td>
             <td>
@@ -148,7 +148,7 @@
   <tbody>
   {% for p in recent %}
     <tr>
-      <td class="faint mono">{{ p.published_at.strftime('%d %b %H:%M') if p.published_at else '' }}</td>
+      <td class="faint mono">{{ p.published_at|localtime }}</td>
       <td class="faint">{{ p.brand }} / {{ p.platform }}</td>
       <td class="truncate">{{ p.body[:130] }}</td>
       <td>{% if p.remote_url %}<a href="{{ p.remote_url }}" target="_blank" rel="noopener">view</a>{% else %}<span class="faint">—</span>{% endif %}</td>

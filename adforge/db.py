@@ -177,6 +177,15 @@ class Post(Base):
     critic_notes = Column(Text, default="")
     generation_meta = Column(Text, default="{}")
 
+    # The NOMINAL slot this post fills, "<brand>/<platform>/<iso-minute>",
+    # before jitter is applied. Dedupe keys off this rather than off
+    # scheduled_for, because scheduled_for carries the jitter and so cannot
+    # identify a slot: a +/-30 minute time window both swallowed legitimate
+    # slots closer together than that AND missed duplicates once jitter
+    # exceeded 15 minutes (two runs re-roll the same slot up to 2*jitter
+    # apart). An exact key has neither failure mode and needs no tuning.
+    slot_key = Column(String(96), default="", index=True)
+
     created_at = Column(DateTime, default=utcnow)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
@@ -342,8 +351,30 @@ def _restrict_db_permissions() -> None:
             )
 
 
+def _migrate() -> None:
+    """Add columns introduced after a database was first created.
+
+    create_all() only creates missing TABLES, not missing columns, so an
+    existing database silently keeps the old shape and every query naming the
+    new column fails. There is no Alembic here; this stays a short explicit
+    list.
+    """
+    from sqlalchemy import inspect, text
+
+    insp = inspect(_engine)
+    if "posts" not in insp.get_table_names():
+        return
+    have = {c["name"] for c in insp.get_columns("posts")}
+    for name, ddl in [("slot_key", "VARCHAR(96) DEFAULT ''")]:
+        if name not in have:
+            with _engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE posts ADD COLUMN {name} {ddl}"))
+            logging.getLogger("adforge.db").info("migrated: posts.%s added", name)
+
+
 def init_db() -> None:
     Base.metadata.create_all(_engine)
+    _migrate()
     _restrict_db_permissions()
 
 

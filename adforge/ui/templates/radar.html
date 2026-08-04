@@ -168,7 +168,7 @@
     <div style="flex:1">
       <strong>{{ t.title[:160] }}</strong><br>
       <span class="faint">{{ t.where }} · u/{{ t.author }}
-        {%- if t.posted_at %} · {{ t.posted_at.strftime('%d %b %H:%M') }}{% endif %}</span>
+        {%- if t.posted_at %} · {{ t.posted_at|localtime }}{% endif %}</span>
     </div>
     <a class="btn sm" href="{{ t.url }}" target="_blank" rel="noopener">open thread</a>
   </div>

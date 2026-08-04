@@ -17,6 +17,7 @@ import json
 import logging
 import re
 import threading
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.parse import urlparse
@@ -110,11 +111,30 @@ async def _same_origin_only(request: Request, call_next):
 app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
 templates = Jinja2Templates(directory=HERE / "templates")
 
+def _localtime(value, fmt: str = "%d %b %H:%M") -> str:
+    """Render a stored timestamp in the configured local timezone.
+
+    Every datetime column comes back NAIVE from SQLite while everything written
+    to it was UTC, so printing one directly showed UTC labelled as local. The
+    queue said 13:00 and the detail page said 09:00 for the same row. Templates
+    must use this filter rather than calling strftime on the column.
+    """
+    if value is None:
+        return ""
+    if getattr(value, "tzinfo", None) is None:
+        value = value.replace(tzinfo=dt.timezone.utc)
+    return value.astimezone(tz()).strftime(fmt)
+
+
+templates.env.filters["localtime"] = _localtime
+
+
 # Bounded: two concurrent jobs already saturate the GPU lock, and a deeper
 # queue only makes the UI lie about how fast things will finish.
 POOL = ThreadPoolExecutor(max_workers=2, thread_name_prefix="adforge-job")
 JOBS: dict[str, dict] = {}
 JOBS_LOCK = threading.Lock()
+_JOB_SEQ = 0
 _scheduler = None
 
 
@@ -136,17 +156,22 @@ def _jobs_snapshot(limit: int) -> list[dict]:
 
 def _job(name: str, fn, *args, **kw) -> str:
     """Run fn in the pool, tracking its state for the UI."""
+    global _JOB_SEQ
     with JOBS_LOCK:
-        # Millisecond ids collided for two same-named jobs in the same tick,
-        # and the second silently overwrote the first.
-        jid = f"{name}-{len(JOBS)}-{int(utcnow().timestamp() * 1000)}"
+        # A monotonic counter, not len(JOBS): once eviction pins the dict at
+        # the cap, len() stops changing and two same-named jobs in the same
+        # millisecond collide again.
+        _JOB_SEQ += 1
+        jid = f"{name}-{_JOB_SEQ}-{int(utcnow().timestamp() * 1000)}"
         JOBS[jid] = {"id": jid, "name": name, "state": "queued",
                      "started": utcnow().isoformat(), "detail": ""}
         # Bounded: only the last handful is ever displayed, so anything older
         # was pure retained garbage in a process meant to run for weeks.
+        # Evict only TERMINAL records - see api_jobs_clear for why "queued"
+        # must never be dropped.
         while len(JOBS) > MAX_TRACKED_JOBS:
             for old_id, rec in list(JOBS.items()):
-                if rec["state"] != "running":
+                if rec["state"] in ("done", "failed"):
                     JOBS.pop(old_id, None)
                     break
             else:
@@ -154,17 +179,24 @@ def _job(name: str, fn, *args, **kw) -> str:
 
     def wrapper():
         with JOBS_LOCK:
+            # setdefault, not [jid][...]: if the record was evicted or cleared
+            # while this job sat in the queue, a bare KeyError here would kill
+            # the job before fn ever ran, and die unnoticed inside the Future.
+            JOBS.setdefault(jid, {"id": jid, "name": name, "detail": "",
+                                  "started": utcnow().isoformat()})
             JOBS[jid]["state"] = "running"
         try:
             result = fn(*args, **kw)
             with JOBS_LOCK:
-                JOBS[jid].update(state="done", detail=str(result)[:300],
-                                 finished=utcnow().isoformat())
+                JOBS.setdefault(jid, {"id": jid, "name": name}).update(
+                    state="done", detail=str(result)[:300],
+                    finished=utcnow().isoformat())
         except Exception as e:  # noqa: BLE001 - surface it in the UI
             log.exception("job %s failed", name)
             with JOBS_LOCK:
-                JOBS[jid].update(state="failed", detail=f"{type(e).__name__}: {e}"[:300],
-                                 finished=utcnow().isoformat())
+                JOBS.setdefault(jid, {"id": jid, "name": name}).update(
+                    state="failed", detail=f"{type(e).__name__}: {e}"[:300],
+                    finished=utcnow().isoformat())
 
     POOL.submit(wrapper)
     return jid
@@ -606,16 +638,31 @@ def _compose_job(brand_key, platform, pillar_key, angle, with_media, when) -> st
         )
         if ps.key in ("reddit", "youtube"):
             post.title = draft.text.strip().split("\n")[0][:290]
+
+        # Render BEFORE the insert, and name the asset with a random slug
+        # rather than post.id.
+        #
+        # Flushing first opens a SQLite write transaction, and generate_image
+        # then waits on the GPU lock and ComfyUI for up to comfy_timeout (30
+        # minutes). Every other writer - the 60-second publish tick, saving an
+        # account, approving a post - would block for busy_timeout and then
+        # return a 500. This is the same trap already fixed in
+        # scheduler/planner.fill_slot; Compose still had it.
+        if with_media and ps.supports_image:
+            slug = f"{brand_key}_{platform}_{uuid.uuid4().hex[:10]}"
+            try:
+                prompt = media_prompt(brand, draft.text, draft.angle)
+                post.media_prompt = prompt
+                post.image_path = str(generate_image(brand, ps, prompt, slug))
+            except Exception as e:  # noqa: BLE001 - never lose the copy
+                log.warning("compose media failed for %s: %s", slug, e)
+                post.critic_notes = (
+                    f"media failed: {str(e)[:200]}; {post.critic_notes}"
+                )[:2000]
+
         s.add(post)
         s.flush()
         pid = post.id
-
-        if with_media and ps.supports_image:
-            prompt = media_prompt(brand, draft.text, draft.angle)
-            post.media_prompt = prompt
-            post.image_path = str(
-                generate_image(brand, ps, prompt, f"{brand_key}_{platform}_{pid}")
-            )
     return f"post {pid}, score {draft.score:.1f}"
 
 
@@ -638,7 +685,10 @@ def schedules(request: Request):
                 continue
             slots = []
             for d in range(3):
-                day = utcnow().date() + dt.timedelta(days=d)
+                # LOCAL date, matching the planner. Using the UTC date made
+                # the preview start at tomorrow from 20:00 local onward, so it
+                # hid exactly the slots about to be filled tonight.
+                day = utcnow().astimezone(tz()).date() + dt.timedelta(days=d)
                 slots += plan_slots(sched, day)
             preview[sched.id] = sorted(slots)[:8]
     return templates.TemplateResponse(
@@ -1126,7 +1176,11 @@ def api_jobs():
 
 @app.post("/api/jobs/clear")
 def api_jobs_clear():
+    # Only terminal records. This used to drop anything not "running", which
+    # included "queued" - and clearing the panel then killed jobs that had not
+    # started yet, silently, because the worker KeyErrored before calling fn.
+    # With a 2-worker pool and jobs that run for minutes, queued is normal.
     with JOBS_LOCK:
-        for jid in [j for j, v in JOBS.items() if v["state"] != "running"]:
+        for jid in [j for j, v in JOBS.items() if v["state"] in ("done", "failed")]:
             JOBS.pop(jid, None)
     return JSONResponse({"ok": True})

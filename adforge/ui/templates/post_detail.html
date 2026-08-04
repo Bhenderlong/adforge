@@ -18,7 +18,7 @@
 {% if post.status.value == 'REVIEW' and post.review_until %}
 <div class="note warn">
   <p>This auto-approves at
-     <strong>{{ post.review_until.strftime('%d %b %H:%M') }} UTC</strong> unless you
+     <strong>{{ post.review_until|localtime }}</strong> unless you
      act. Use <em>Hold</em> to stop the clock while you decide.</p>
 </div>
 {% endif %}
@@ -83,7 +83,7 @@
       <div class="field">
         <label>Scheduled for <span class="faint">(local time)</span></label>
         <input type="datetime-local" name="scheduled_for"
-               value="{{ post.scheduled_for.replace(tzinfo=utc).astimezone(tz).strftime('%Y-%m-%dT%H:%M') if post.scheduled_for else '' }}">
+               value="{{ post.scheduled_for|localtime('%Y-%m-%dT%H:%M') }}">
       </div>
 
       <button class="primary" type="submit">Save changes</button>
@@ -163,9 +163,9 @@
         {% if meta.get('angle') %}
         <tr><td class="faint">Angle</td><td class="faint">{{ meta.angle }}</td></tr>
         {% endif %}
-        <tr><td class="faint">Created</td><td class="faint mono">{{ post.created_at.strftime('%d %b %H:%M') if post.created_at }}</td></tr>
+        <tr><td class="faint">Created</td><td class="faint mono">{{ post.created_at|localtime }}</td></tr>
         {% if post.published_at %}
-        <tr><td class="faint">Published</td><td class="faint mono">{{ post.published_at.strftime('%d %b %H:%M') }}</td></tr>
+        <tr><td class="faint">Published</td><td class="faint mono">{{ post.published_at|localtime }}</td></tr>
         {% endif %}
         {% if post.remote_url %}
         <tr><td class="faint">Live at</td><td><a href="{{ post.remote_url }}" target="_blank" rel="noopener">{{ post.remote_url[:60] }}</a></td></tr>
