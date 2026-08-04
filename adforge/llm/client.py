@@ -194,7 +194,23 @@ def available_models() -> list[str]:
         return []
 
 
-def health() -> tuple[bool, str]:
+# The dashboard polls status every few seconds. Re-listing every model on each
+# poll is a wasted round trip to the backend, and while a large model is loading
+# that call can block long enough to stall the UI.
+_HEALTH_CACHE: dict = {"at": 0.0, "value": None}
+_HEALTH_TTL = 20.0
+
+
+def health(force: bool = False) -> tuple[bool, str]:
+    now = time.time()
+    if not force and _HEALTH_CACHE["value"] and now - _HEALTH_CACHE["at"] < _HEALTH_TTL:
+        return _HEALTH_CACHE["value"]
+    result = _health_uncached()
+    _HEALTH_CACHE.update(at=now, value=result)
+    return result
+
+
+def _health_uncached() -> tuple[bool, str]:
     try:
         models = available_models()
         if not models:

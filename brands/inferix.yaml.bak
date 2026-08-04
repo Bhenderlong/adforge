@@ -1,0 +1,109 @@
+key: inferix
+name: Inferix
+url: https://inferix.co
+tagline: The GPU cloud for AI
+
+# One paragraph the copywriter is grounded on. Everything it claims must be
+# traceable to this or to proof_points below.
+about: >
+  Inferix is a GPU cloud built for teams who want their models, their data and
+  their compute in one place. Publish and version models and datasets with
+  Git-style workflows. Launch Spaces to demo your work. Deploy
+  OpenAI-compatible inference endpoints that drop into any existing SDK by
+  changing a base URL. Rent verified GPU capacity by the hour, or list hardware
+  you already own and earn from it. No proprietary model formats, no lock-in on
+  your artifacts.
+
+audience: >
+  ML engineers, applied-AI developers and small AI teams who currently juggle
+  Hugging Face for artifacts and a separate GPU marketplace for compute, plus
+  GPU owners with idle consumer hardware looking to earn from it.
+
+# Concrete, verifiable differentiators. The copywriter may only make claims
+# that appear here - this is the guard against the model inventing benchmarks.
+proof_points:
+  - "OpenAI-compatible endpoints: change the base URL and existing SDK code works unmodified"
+  - Models, datasets, Spaces and GPU rental in one account instead of two vendors
+  - Per-second billing with no minimum commitment
+  - Real verified GPU hardware rather than resold capacity
+  - Inference router gives one endpoint for every routable model, with automatic fallback
+  - Git-style versioning for models and datasets; artifacts stay portable
+  - List hardware you already own and earn from it
+  - Self-hosted agentic coding workspace (Inferix Coder) runs against your own model server
+
+# Content pillars: the recurring subjects a feed is built from. Weighted -
+# higher weight is chosen more often by the planner.
+pillars:
+  - key: ai_news
+    weight: 3
+    label: What is new in open AI
+    description: >
+      A specific, recent development in open models, inference tooling or GPU
+      hardware, explained for a practitioner, with a concrete takeaway. Ties
+      back to Inferix only where genuinely relevant.
+  - key: tips
+    weight: 3
+    label: Tips and tricks working with AI
+    description: >
+      A single actionable technique - quantization tradeoffs, batching, KV
+      cache, LoRA, prompt caching, serving throughput, VRAM math. Must contain
+      something a reader can act on today.
+  - key: cost
+    weight: 2
+    label: The economics of running models
+    description: >
+      Concrete cost and performance math for inference and training. Real
+      numbers, honest tradeoffs, no manufactured comparisons against named
+      competitors.
+  - key: product
+    weight: 2
+    label: Product capability
+    description: >
+      One capability, shown rather than described - the endpoint swap, dataset
+      versioning, Spaces, renting a verified GPU.
+  - key: build_in_public
+    weight: 1
+    label: Build in public
+    description: >
+      Something learned building the platform, including things that went
+      wrong. Honest engineering notes, not milestone celebration.
+
+keywords:
+  - open source LLM
+  - GPU cloud
+  - inference endpoint
+  - vLLM
+  - LoRA fine-tuning
+  - model hosting
+  - RTX 5090
+  - self-hosted AI
+
+cta_variants:
+  - Free account at inferix.co
+  - Try it at inferix.co
+  - "Docs and free tier: inferix.co"
+  - "Swap your base URL and see: inferix.co"
+
+# Visual direction handed to the image model for every generated asset.
+visual:
+  style: >
+    Clean technical product aesthetic. Deep near-black backgrounds, cyan and
+    electric-blue accent light, subtle volumetric glow, crisp geometry.
+    Datacenter and GPU hardware motifs, abstract compute topology, isometric
+    server geometry. Sharp, high contrast, uncluttered, professional.
+  negative: >
+    stock photo people, handshake, generic businessman, cheesy, cluttered,
+    watermark, text artifacts, garbled letters, low quality, blurry, oversaturated
+  palette: ["#06b6d4", "#0ea5e9", "#0b1220", "#e2e8f0"]
+
+voice:
+  do:
+    - Lead with a specific technical fact or number
+    - Sound like an engineer who ships, talking to other engineers
+    - Use plain concrete nouns; name the actual technology
+    - Admit tradeoffs - it builds more trust than a clean pitch
+  dont:
+    - Hype adjectives - revolutionary, game-changing, cutting-edge, seamless, unleash
+    - Rhetorical questions as openers
+    - Emoji bullet lists as structure
+    - Any claim not traceable to proof_points

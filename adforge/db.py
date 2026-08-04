@@ -31,6 +31,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     create_engine,
+    event,
 )
 from sqlalchemy.orm import DeclarativeBase, Session, relationship, sessionmaker
 
@@ -274,8 +275,37 @@ class Setting(Base):
 
 
 _engine = create_engine(
-    settings.db_url, connect_args={"check_same_thread": False}, future=True
+    settings.db_url,
+    connect_args={
+        "check_same_thread": False,
+        # The UI, the scheduler thread pool and a separate `--worker` process
+        # all write this file. Without a busy timeout, a concurrent write
+        # raises "database is locked" immediately and the losing transaction
+        # is rolled back - which shows up as a generated post silently never
+        # appearing in the queue.
+        "timeout": 30,
+    },
+    future=True,
 )
+
+
+@event.listens_for(_engine, "connect")
+def _sqlite_pragmas(dbapi_conn, _record):
+    """WAL + a busy timeout, set on every connection.
+
+    Default SQLite journalling takes an exclusive lock for the whole write
+    transaction, so a reader blocks a writer and two writers conflict. WAL lets
+    readers continue during a write and is what makes multi-process access
+    (`run.py` plus `run.py --worker`) safe rather than merely usually-fine.
+    """
+    cur = dbapi_conn.cursor()
+    cur.execute("PRAGMA journal_mode=WAL")
+    cur.execute("PRAGMA busy_timeout=30000")
+    cur.execute("PRAGMA synchronous=NORMAL")
+    cur.execute("PRAGMA foreign_keys=ON")
+    cur.close()
+
+
 SessionLocal = sessionmaker(bind=_engine, expire_on_commit=False, future=True)
 
 

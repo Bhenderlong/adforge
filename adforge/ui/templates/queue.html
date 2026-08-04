@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block title %}Queue — AdForge{% endblock %}
+{% block body %}
+<div class="row">
+  <div>
+    <h1>Content queue</h1>
+    <p class="sub">Everything generated, in review, scheduled or published.</p>
+  </div>
+  <div class="right row">
+    <form method="post" action="/schedules/plan-now"><button>Generate ahead</button></form>
+    <form method="post" action="/schedules/tick"><button>Run publish tick</button></form>
+    <a class="btn primary" href="/compose">Compose</a>
+  </div>
+</div>
+
+<form method="get" class="card tight" style="margin-bottom:14px">
+  <div class="row">
+    <div style="min-width:160px">
+      <label>Brand</label>
+      <select name="brand" onchange="this.form.submit()">
+        <option value="">all</option>
+        {% for k, b in brands.items() %}
+          <option value="{{ k }}" {{ 'selected' if f_brand == k }}>{{ b.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div style="min-width:160px">
+      <label>Platform</label>
+      <select name="platform" onchange="this.form.submit()">
+        <option value="">all</option>
+        {% for k, p in platforms.items() %}
+          <option value="{{ k }}" {{ 'selected' if f_platform == k }}>{{ p.label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div style="min-width:160px">
+      <label>Status</label>
+      <select name="status" onchange="this.form.submit()">
+        <option value="">all</option>
+        {% for st in statuses %}
+          <option value="{{ st.value }}" {{ 'selected' if f_status == st.value }}>
+            {{ st.value }} ({{ counts.get(st.value, 0) }})
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="right"><a class="btn sm" href="/queue">clear filters</a></div>
+  </div>
+</form>
+
+<div class="card tight">
+<table>
+  <thead>
+    <tr>
+      <th>Status</th><th>When</th><th>Where</th><th>Media</th>
+      <th>Copy</th><th>Score</th><th></th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for p in posts %}
+    <tr>
+      <td>
+        <span class="pill st-{{ p.status.value }}">{{ p.status.value }}</span>
+        {% if p.mode.value == 'MANUAL' %}<br><span class="faint">manual</span>{% endif %}
+      </td>
+      <td class="faint mono">
+        {{ p.scheduled_for.strftime('%d %b %H:%M') if p.scheduled_for else '—' }}
+        {% if p.review_until and p.status.value == 'REVIEW' %}
+          <br><span title="Auto-approves at this time">⏱ {{ p.review_until.strftime('%H:%M') }}</span>
+        {% endif %}
+      </td>
+      <td>
+        <span class="faint">{{ p.brand }}</span><br>{{ p.platform }}
+        {% if p.pillar %}<br><span class="tag">{{ p.pillar }}</span>{% endif %}
+      </td>
+      <td>
+        {% if p.video_path %}
+          <span class="pill info">video</span>
+        {% elif p.image_path %}
+          <img class="thumb sm" src="/asset/{{ p.image_path.split('/')[-1] }}" alt="">
+        {% else %}<span class="faint">—</span>{% endif %}
+      </td>
+      <td>
+        {% if p.title %}<strong>{{ p.title[:90] }}</strong><br>{% endif %}
+        <span class="truncate">{{ p.body[:200] }}</span>
+        {% if p.error %}<br><span class="pill bad" title="{{ p.error }}">error</span>{% endif %}
+      </td>
+      <td>
+        <span class="score {{ 'hi' if p.quality_score >= 7.5 else ('mid' if p.quality_score >= 6 else 'lo') }}">
+          {{ '%.1f'|format(p.quality_score or 0) }}
+        </span>
+      </td>
+      <td><a class="btn sm" href="/post/{{ p.id }}">open</a></td>
+    </tr>
+  {% else %}
+    <tr><td colspan="7" class="faint">
+      Nothing here yet. Enable a schedule or use <a href="/compose">Compose</a>.
+    </td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

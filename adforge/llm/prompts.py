@@ -239,6 +239,51 @@ Score it."""
     ]
 
 
+FACTCHECK_SYSTEM = """\
+You verify that marketing copy only makes claims its source material supports.
+
+You are given an APPROVED CLAIMS list and a piece of copy. Extract every factual
+assertion the copy makes about the product - how it works, what it costs, what
+steps it involves, what it integrates with, how long something takes - and
+decide whether each is supported.
+
+Supported means the approved claims state it, or it follows directly from them.
+NOT supported means the copy invented a specific: a process step, a duration, a
+threshold, an integration, a limit or a feature that does not appear above.
+
+Be strict about invented specifics. "Verification requires a one-time 10-minute
+test" is unsupported unless the claims mention that test and that duration.
+General industry facts not about the product (how KV cache works, what an
+auditor asks for) are NOT product claims - ignore those.
+
+Reply with ONLY JSON:
+{"unsupported": [{"claim": "quoted from the copy", "why": "short reason"}]}
+Return an empty list if everything checks out.
+"""
+
+
+def factcheck_prompt(text: str, brand: Brand) -> list[dict]:
+    claims = "\n".join(f"  - {p}" for p in brand.proof_points)
+    user = f"""PRODUCT: {brand.name} - {brand.tagline}
+
+WHAT IT IS (source of truth):
+{brand.about.strip()}
+
+APPROVED CLAIMS (the only product facts that may be asserted):
+{claims}
+
+COPY TO CHECK:
+---
+{text}
+---
+
+List any unsupported product claims."""
+    return [
+        {"role": "system", "content": FACTCHECK_SYSTEM},
+        {"role": "user", "content": user},
+    ]
+
+
 def revise_prompt(
     text: str, brand: Brand, ps: PlatformSpec, problems: list[str], fix: str
 ) -> list[dict]:

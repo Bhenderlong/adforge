@@ -1,0 +1,948 @@
+"""
+AdForge web UI.
+
+FastAPI + Jinja2 + HTMX. No build step, no node_modules, no CDN - the whole
+interface is served from this process so it works on an air-gapped box.
+
+Long-running work (generation, rendering, publishing) is dispatched to a
+background thread pool rather than executed in the request, because a single
+post can take minutes on a 70B model plus a Wan render and no browser will wait
+that long. The UI polls for state.
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+import json
+import logging
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+
+from fastapi import FastAPI, Form, HTTPException, Request
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+
+from .. import gpu as gpumod
+from ..brands import all_brands, get_brand, reload_brands
+from ..config import ASSETS, BRANDS_DIR, ROOT, settings
+from ..db import (
+    Account,
+    Metric,
+    Post,
+    PostMode,
+    PostStatus,
+    RadarTarget,
+    RadarThread,
+    ReplyDraft,
+    Schedule,
+    Setting,
+    init_db,
+    session_scope,
+    utcnow,
+)
+from ..llm.client import health as llm_health
+from ..media import comfy
+from ..platforms.registry import ADAPTERS, account_status, publish_post
+from ..platforms.spec import SPECS, spec
+from ..scheduler.engine import build_scheduler, plan_ahead, promote_and_publish
+from ..scheduler.planner import plan_slots, tz
+
+log = logging.getLogger("adforge.ui")
+
+HERE = Path(__file__).resolve().parent
+app = FastAPI(title="AdForge")
+app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
+templates = Jinja2Templates(directory=HERE / "templates")
+
+# Bounded: two concurrent jobs already saturate the GPU lock, and a deeper
+# queue only makes the UI lie about how fast things will finish.
+POOL = ThreadPoolExecutor(max_workers=2, thread_name_prefix="adforge-job")
+JOBS: dict[str, dict] = {}
+JOBS_LOCK = threading.Lock()
+_scheduler = None
+
+
+def _job(name: str, fn, *args, **kw) -> str:
+    """Run fn in the pool, tracking its state for the UI."""
+    jid = f"{name}-{int(utcnow().timestamp() * 1000)}"
+    with JOBS_LOCK:
+        JOBS[jid] = {"id": jid, "name": name, "state": "running",
+                     "started": utcnow().isoformat(), "detail": ""}
+
+    def wrapper():
+        try:
+            result = fn(*args, **kw)
+            with JOBS_LOCK:
+                JOBS[jid].update(state="done", detail=str(result)[:300],
+                                 finished=utcnow().isoformat())
+        except Exception as e:  # noqa: BLE001 - surface it in the UI
+            log.exception("job %s failed", name)
+            with JOBS_LOCK:
+                JOBS[jid].update(state="failed", detail=f"{type(e).__name__}: {e}"[:300],
+                                 finished=utcnow().isoformat())
+
+    POOL.submit(wrapper)
+    return jid
+
+
+def _flash(request: Request, msg: str, kind: str = "ok") -> None:
+    request.session_flash = (kind, msg)  # type: ignore[attr-defined]
+
+
+@app.on_event("startup")
+def _startup() -> None:
+    global _scheduler
+    init_db()
+    _seed_defaults()
+    _scheduler = build_scheduler()
+    _scheduler.start()
+    log.info("adforge ui up on %s:%s", settings.host, settings.port)
+
+
+@app.on_event("shutdown")
+def _shutdown() -> None:
+    if _scheduler:
+        _scheduler.shutdown(wait=False)
+    POOL.shutdown(wait=False)
+
+
+def _seed_defaults() -> None:
+    """Create a disabled account + schedule row per brand/platform.
+
+    Every destination is visible in the UI from first run, all switched off,
+    so enabling one is a deliberate act rather than something that happens by
+    forgetting to disable it.
+    """
+    with session_scope() as s:
+        for bkey in all_brands():
+            for pkey in SPECS:
+                if not s.query(Account).filter_by(brand=bkey, platform=pkey).first():
+                    s.add(Account(brand=bkey, platform=pkey, enabled=False,
+                                  dry_run=True, mode=PostMode.AUTO,
+                                  credentials="{}", options="{}"))
+                if not s.query(Schedule).filter_by(brand=bkey, platform=pkey).first():
+                    s.add(Schedule(brand=bkey, platform=pkey, enabled=False,
+                                   posts_per_day=1, days_of_week="0,1,2,3,4",
+                                   times="09:30", window_start="09:00",
+                                   window_end="17:00", jitter_minutes=12))
+
+
+# ---------------------------------------------------------------------------
+# Template context
+# ---------------------------------------------------------------------------
+
+
+def ctx(request: Request, **kw) -> dict:
+    base = {
+        "request": request,
+        "brands": all_brands(),
+        "platforms": SPECS,
+        "settings": settings,
+        "now": utcnow(),
+    }
+    base.update(kw)
+    return base
+
+
+def _status_counts(s) -> dict:
+    out = {}
+    for st in PostStatus:
+        out[st.value] = s.query(Post.id).filter(Post.status == st).count()
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Dashboard
+# ---------------------------------------------------------------------------
+
+
+@app.get("/", response_class=HTMLResponse)
+def dashboard(request: Request):
+    with session_scope() as s:
+        counts = _status_counts(s)
+        upcoming = (
+            s.query(Post)
+            .filter(Post.status.in_([PostStatus.REVIEW, PostStatus.APPROVED]))
+            .order_by(Post.scheduled_for)
+            .limit(12)
+            .all()
+        )
+        recent = (
+            s.query(Post)
+            .filter(Post.status == PostStatus.PUBLISHED)
+            .order_by(Post.published_at.desc())
+            .limit(8)
+            .all()
+        )
+        hot = (
+            s.query(RadarThread)
+            .filter(RadarThread.dismissed.is_(False))
+            .order_by(RadarThread.relevance.desc())
+            .limit(6)
+            .all()
+        )
+        live_accounts = (
+            s.query(Account)
+            .filter(Account.enabled.is_(True))
+            .all()
+        )
+        live = [(a, *account_status(a)) for a in live_accounts]
+
+    ok_llm, msg_llm = llm_health()
+    return templates.TemplateResponse(
+        request, "dashboard.html",
+        ctx(request, counts=counts, upcoming=upcoming, recent=recent, hot=hot,
+            live=live, llm_ok=ok_llm, llm_msg=msg_llm,
+            comfy_ok=comfy.is_up(), vram=gpumod.vram(),
+            gpu_mode=gpumod.current_mode(), jobs=list(JOBS.values())[-8:]),
+    )
+
+
+@app.get("/api/status")
+def api_status():
+    """Polled by the dashboard for live status without a full reload."""
+    ok_llm, msg_llm = llm_health()
+    with session_scope() as s:
+        counts = _status_counts(s)
+    with JOBS_LOCK:
+        jobs = list(JOBS.values())[-8:]
+    return JSONResponse({
+        "llm": {"ok": ok_llm, "detail": msg_llm},
+        "comfy": comfy.is_up(),
+        "gpu_mode": gpumod.current_mode(),
+        "vram": gpumod.vram(),
+        "counts": counts,
+        "jobs": jobs,
+    })
+
+
+# ---------------------------------------------------------------------------
+# Queue
+# ---------------------------------------------------------------------------
+
+
+@app.get("/queue", response_class=HTMLResponse)
+def queue(request: Request, brand: str = "", platform: str = "", status: str = ""):
+    with session_scope() as s:
+        q = s.query(Post)
+        if brand:
+            q = q.filter(Post.brand == brand)
+        if platform:
+            q = q.filter(Post.platform == platform)
+        if status:
+            q = q.filter(Post.status == PostStatus(status))
+        posts = q.order_by(Post.scheduled_for.desc().nullslast(),
+                           Post.id.desc()).limit(200).all()
+        counts = _status_counts(s)
+    return templates.TemplateResponse(
+        request, "queue.html",
+        ctx(request, posts=posts, counts=counts, f_brand=brand,
+            f_platform=platform, f_status=status, statuses=list(PostStatus)),
+    )
+
+
+@app.get("/post/{post_id}", response_class=HTMLResponse)
+def post_detail(request: Request, post_id: int):
+    with session_scope() as s:
+        post = s.get(Post, post_id)
+        if not post:
+            raise HTTPException(404, "no such post")
+        account = s.get(Account, post.account_id) if post.account_id else None
+        meta = {}
+        try:
+            meta = json.loads(post.generation_meta or "{}")
+        except json.JSONDecodeError:
+            pass
+    return templates.TemplateResponse(
+        request, "post_detail.html",
+        ctx(request, post=post, account=account, ps=spec(post.platform), meta=meta),
+    )
+
+
+@app.post("/post/{post_id}/edit")
+def post_edit(
+    post_id: int,
+    body: str = Form(""),
+    title: str = Form(""),
+    hashtags: str = Form(""),
+    link: str = Form(""),
+    scheduled_for: str = Form(""),
+):
+    with session_scope() as s:
+        post = s.get(Post, post_id)
+        if not post:
+            raise HTTPException(404, "no such post")
+        ps = spec(post.platform)
+        if len(body) > ps.max_chars:
+            raise HTTPException(
+                400, f"{len(body)} chars exceeds the {ps.label} limit of {ps.max_chars}"
+            )
+        post.body = body
+        post.title = title
+        post.hashtags = hashtags
+        post.link = link
+        if scheduled_for:
+            try:
+                local = dt.datetime.fromisoformat(scheduled_for).replace(tzinfo=tz())
+                post.scheduled_for = local.astimezone(dt.timezone.utc)
+            except ValueError:
+                raise HTTPException(400, f"bad datetime {scheduled_for!r}") from None
+    return RedirectResponse(f"/post/{post_id}", status_code=303)
+
+
+@app.post("/post/{post_id}/action")
+def post_action(post_id: int, action: str = Form(...)):
+    with session_scope() as s:
+        post = s.get(Post, post_id)
+        if not post:
+            raise HTTPException(404, "no such post")
+
+        if action == "approve":
+            post.status = PostStatus.APPROVED
+            post.review_until = None
+        elif action == "reject":
+            post.status = PostStatus.REJECTED
+        elif action == "hold":
+            # Pull back into review and clear the timer, so an auto account
+            # cannot publish it while the user is still deciding.
+            post.status = PostStatus.REVIEW
+            post.mode = PostMode.MANUAL
+            post.review_until = None
+        elif action == "publish_now":
+            account = s.get(Account, post.account_id) if post.account_id else None
+            post.status = PostStatus.APPROVED
+            post.scheduled_for = utcnow()
+            post.attempts = 0
+            _job(f"publish#{post.id}", _publish_one, post.id)
+        elif action == "regenerate":
+            _job(f"regen#{post.id}", _regenerate, post.id)
+        elif action == "regenerate_media":
+            _job(f"media#{post.id}", _regen_media, post.id)
+        elif action == "delete":
+            s.delete(post)
+            return RedirectResponse("/queue", status_code=303)
+        else:
+            raise HTTPException(400, f"unknown action {action!r}")
+    return RedirectResponse(f"/post/{post_id}", status_code=303)
+
+
+def _publish_one(post_id: int) -> str:
+    with session_scope() as s:
+        post = s.get(Post, post_id)
+        account = s.get(Account, post.account_id) if post.account_id else None
+        result = publish_post(post, account)
+        return result.url or result.detail
+
+
+def _regenerate(post_id: int) -> str:
+    from ..llm.copywriter import write_post
+    from ..scheduler.planner import recent_bodies
+
+    with session_scope() as s:
+        post = s.get(Post, post_id)
+        brand = get_brand(post.brand)
+        ps = spec(post.platform)
+        pillar = brand.pillar(post.pillar) if post.pillar else brand.pick_pillar()
+        recent = recent_bodies(s, post.brand, post.platform)
+        draft = write_post(brand, ps, pillar, recent=recent)
+        post.body = draft.text
+        post.hashtags = ",".join(draft.hashtags)
+        post.quality_score = draft.score
+        post.critic_notes = "; ".join(draft.problems[:6])
+        post.status = PostStatus.REVIEW
+        post.generation_meta = json.dumps(
+            {"angle": draft.angle, "attempts": draft.attempts}
+        )
+        return f"score {draft.score:.1f}"
+
+
+def _regen_media(post_id: int) -> str:
+    from ..llm.copywriter import media_prompt
+    from ..media.images import generate_image
+
+    with session_scope() as s:
+        post = s.get(Post, post_id)
+        brand = get_brand(post.brand)
+        ps = spec(post.platform)
+        prompt = post.media_prompt or media_prompt(brand, post.body, post.pillar)
+        post.media_prompt = prompt
+        path = generate_image(
+            brand, ps, prompt, f"{post.brand}_{post.platform}_{post.id}"
+        )
+        post.image_path = str(path)
+        return path.name
+
+
+@app.get("/asset/{name}")
+def asset(name: str):
+    """Serve a generated asset. Path-traversal safe."""
+    target = (ASSETS / name).resolve()
+    if not str(target).startswith(str(ASSETS.resolve())) or not target.exists():
+        raise HTTPException(404, "no such asset")
+    return FileResponse(target)
+
+
+# ---------------------------------------------------------------------------
+# Composer - manual one-off posts
+# ---------------------------------------------------------------------------
+
+
+@app.get("/compose", response_class=HTMLResponse)
+def compose(request: Request):
+    return templates.TemplateResponse(
+        request, "compose.html", ctx(request))
+
+
+@app.post("/compose")
+def compose_submit(
+    brand: str = Form(...),
+    platform: str = Form(...),
+    pillar: str = Form(""),
+    angle: str = Form(""),
+    with_media: str = Form(""),
+    when: str = Form(""),
+):
+    _job(
+        f"compose:{brand}/{platform}",
+        _compose_job, brand, platform, pillar, angle, bool(with_media), when,
+    )
+    return RedirectResponse("/queue", status_code=303)
+
+
+def _compose_job(brand_key, platform, pillar_key, angle, with_media, when) -> str:
+    from ..llm.copywriter import media_prompt, write_post
+    from ..media.images import generate_image
+    from ..scheduler.planner import recent_bodies
+
+    brand = get_brand(brand_key)
+    ps = spec(platform)
+    pillar = brand.pillar(pillar_key) if pillar_key else brand.pick_pillar()
+
+    with session_scope() as s:
+        recent = recent_bodies(s, brand_key, platform)
+        draft = write_post(brand, ps, pillar, angle=angle or None, recent=recent)
+        account = (
+            s.query(Account).filter_by(brand=brand_key, platform=platform).first()
+        )
+        scheduled = utcnow()
+        if when:
+            try:
+                scheduled = (
+                    dt.datetime.fromisoformat(when)
+                    .replace(tzinfo=tz())
+                    .astimezone(dt.timezone.utc)
+                )
+            except ValueError:
+                pass
+
+        post = Post(
+            brand=brand_key, platform=platform,
+            account_id=account.id if account else None,
+            pillar=pillar.key, status=PostStatus.REVIEW, mode=PostMode.MANUAL,
+            body=draft.text, hashtags=",".join(draft.hashtags), link=brand.url,
+            scheduled_for=scheduled, quality_score=draft.score,
+            critic_notes="; ".join(draft.problems[:6]),
+            generation_meta=json.dumps({"angle": draft.angle,
+                                        "attempts": draft.attempts}),
+        )
+        if ps.key in ("reddit", "youtube"):
+            post.title = draft.text.strip().split("\n")[0][:290]
+        s.add(post)
+        s.flush()
+        pid = post.id
+
+        if with_media and ps.supports_image:
+            prompt = media_prompt(brand, draft.text, draft.angle)
+            post.media_prompt = prompt
+            post.image_path = str(
+                generate_image(brand, ps, prompt, f"{brand_key}_{platform}_{pid}")
+            )
+    return f"post {pid}, score {draft.score:.1f}"
+
+
+# ---------------------------------------------------------------------------
+# Schedules
+# ---------------------------------------------------------------------------
+
+
+@app.get("/schedules", response_class=HTMLResponse)
+def schedules(request: Request):
+    with session_scope() as s:
+        rows = s.query(Schedule).order_by(Schedule.brand, Schedule.platform).all()
+        accounts = {
+            (a.brand, a.platform): a for a in s.query(Account).all()
+        }
+        # Preview the next two days so the cadence is visible, not theoretical.
+        preview = {}
+        for sched in rows:
+            if not sched.enabled:
+                continue
+            slots = []
+            for d in range(3):
+                day = utcnow().date() + dt.timedelta(days=d)
+                slots += plan_slots(sched, day)
+            preview[sched.id] = sorted(slots)[:8]
+    return templates.TemplateResponse(
+        request, "schedules.html",
+        ctx(request, schedules=rows, accounts=accounts, preview=preview, tz=tz()),
+    )
+
+
+@app.post("/schedules/{sched_id}")
+def schedule_save(
+    sched_id: int,
+    enabled: str = Form(""),
+    posts_per_day: int = Form(1),
+    days_of_week: list[str] = Form([]),
+    times: str = Form(""),
+    window_start: str = Form("09:00"),
+    window_end: str = Form("17:00"),
+    jitter_minutes: int = Form(12),
+    pillars: list[str] = Form([]),
+    attach_media: str = Form(""),
+):
+    with session_scope() as s:
+        sched = s.get(Schedule, sched_id)
+        if not sched:
+            raise HTTPException(404, "no such schedule")
+        sched.enabled = bool(enabled)
+        sched.posts_per_day = max(0, min(int(posts_per_day), settings.daily_post_cap))
+        sched.days_of_week = ",".join(days_of_week)
+        sched.times = times
+        sched.window_start = window_start
+        sched.window_end = window_end
+        sched.jitter_minutes = max(0, int(jitter_minutes))
+        sched.pillars = ",".join(pillars)
+        sched.attach_media = bool(attach_media)
+    return RedirectResponse("/schedules", status_code=303)
+
+
+@app.post("/schedules/plan-now")
+def schedule_plan_now():
+    _job("plan", plan_ahead)
+    return RedirectResponse("/schedules", status_code=303)
+
+
+@app.post("/schedules/tick")
+def schedule_tick():
+    _job("publish-tick", promote_and_publish)
+    return RedirectResponse("/queue", status_code=303)
+
+
+# ---------------------------------------------------------------------------
+# Accounts
+# ---------------------------------------------------------------------------
+
+
+@app.get("/accounts", response_class=HTMLResponse)
+def accounts(request: Request):
+    with session_scope() as s:
+        rows = s.query(Account).order_by(Account.brand, Account.platform).all()
+        status = {a.id: account_status(a) for a in rows}
+        creds = {a.id: a.creds() for a in rows}
+        opts = {a.id: a.opts() for a in rows}
+    required = {k: a.required_credentials for k, a in ADAPTERS.items()}
+    return templates.TemplateResponse(
+        request, "accounts.html",
+        ctx(request, accounts=rows, status=status, creds=creds, opts=opts,
+            required=required, notes={k: SPECS[k].notes for k in SPECS}),
+    )
+
+
+@app.post("/accounts/{account_id}")
+async def account_save(request: Request, account_id: int):
+    form = await request.form()
+    with session_scope() as s:
+        acct = s.get(Account, account_id)
+        if not acct:
+            raise HTTPException(404, "no such account")
+
+        acct.handle = str(form.get("handle", ""))
+        acct.enabled = bool(form.get("enabled"))
+        acct.mode = PostMode(str(form.get("mode", "AUTO")))
+        # Tri-state: "" inherits the global dry-run switch.
+        dr = str(form.get("dry_run", ""))
+        acct.dry_run = None if dr == "" else (dr == "1")
+
+        # Credential fields arrive as cred_<name>. An empty submission keeps
+        # the stored value, so the UI can show masked placeholders without
+        # wiping secrets on every save.
+        creds = acct.creds()
+        for key, value in form.items():
+            if key.startswith("cred_"):
+                name = key[5:]
+                if str(value).strip():
+                    creds[name] = str(value).strip()
+        acct.credentials = json.dumps(creds)
+
+        opts = acct.opts()
+        for key, value in form.items():
+            if key.startswith("opt_"):
+                name = key[4:]
+                v = str(value).strip()
+                if v.lower() in ("true", "false"):
+                    opts[name] = v.lower() == "true"
+                elif v:
+                    opts[name] = v
+        # Checkbox options only appear in the form when ticked.
+        for flag in ("allowed", "links_allowed", "allow_image", "direct_post"):
+            if f"optflag_{flag}" in form:
+                opts[flag] = bool(form.get(f"optflag_{flag}"))
+            elif f"optflag_{flag}_present" in form:
+                opts[flag] = False
+        acct.options = json.dumps(opts)
+    return RedirectResponse("/accounts", status_code=303)
+
+
+@app.post("/accounts/{account_id}/clear-credential")
+def account_clear_credential(account_id: int, name: str = Form(...)):
+    with session_scope() as s:
+        acct = s.get(Account, account_id)
+        if not acct:
+            raise HTTPException(404, "no such account")
+        creds = acct.creds()
+        creds.pop(name, None)
+        acct.credentials = json.dumps(creds)
+    return RedirectResponse("/accounts", status_code=303)
+
+
+@app.post("/accounts/{account_id}/test")
+def account_test(account_id: int):
+    """Dry-run a throwaway post to prove the payload builds."""
+    with session_scope() as s:
+        acct = s.get(Account, account_id)
+        if not acct:
+            raise HTTPException(404, "no such account")
+        brand = get_brand(acct.brand)
+        ps = spec(acct.platform)
+        probe = Post(
+            brand=acct.brand, platform=acct.platform, account_id=acct.id,
+            title="AdForge connection test",
+            body=f"Connection test for {brand.name}. This is a dry run and is "
+                 f"not transmitted to {ps.label}.",
+            link=brand.url,
+        )
+        try:
+            adapter = ADAPTERS[acct.platform]
+            problems = adapter.validate(acct.creds(), acct.opts())
+            detail = "; ".join(problems) if problems else "credentials present"
+        except Exception as e:  # noqa: BLE001
+            detail = f"{type(e).__name__}: {e}"
+    return JSONResponse({"account": account_id, "detail": detail})
+
+
+# ---------------------------------------------------------------------------
+# Radar
+# ---------------------------------------------------------------------------
+
+
+@app.get("/radar", response_class=HTMLResponse)
+def radar(request: Request, brand: str = "", min_rel: float = 0.0):
+    with session_scope() as s:
+        q = s.query(RadarThread).filter(RadarThread.dismissed.is_(False))
+        if brand:
+            q = q.filter(RadarThread.brand == brand)
+        if min_rel:
+            q = q.filter(RadarThread.relevance >= min_rel)
+        threads = q.order_by(RadarThread.relevance.desc()).limit(120).all()
+        targets = s.query(RadarTarget).order_by(RadarTarget.brand).all()
+        drafts = {}
+        for t in threads:
+            d = (
+                s.query(ReplyDraft)
+                .filter(ReplyDraft.thread_id == t.id)
+                .order_by(ReplyDraft.id.desc())
+                .first()
+            )
+            if d:
+                drafts[t.id] = d
+    return templates.TemplateResponse(
+        request, "radar.html",
+        ctx(request, threads=threads, targets=targets, drafts=drafts,
+            f_brand=brand, f_min=min_rel),
+    )
+
+
+@app.post("/radar/targets/new")
+def radar_target_new(
+    brand: str = Form(...),
+    source: str = Form(...),
+    target: str = Form(...),
+    keywords: str = Form(""),
+    promo_allowed: str = Form(""),
+    rules_note: str = Form(""),
+    min_relevance: float = Form(0.6),
+):
+    with session_scope() as s:
+        s.add(RadarTarget(
+            brand=brand, source=source, target=target.strip().lstrip("r/"),
+            keywords=keywords, enabled=True,
+            promo_allowed=bool(promo_allowed), rules_note=rules_note,
+            min_relevance=min_relevance,
+        ))
+    return RedirectResponse("/radar", status_code=303)
+
+
+@app.post("/radar/targets/{target_id}")
+def radar_target_save(
+    target_id: int,
+    keywords: str = Form(""),
+    enabled: str = Form(""),
+    promo_allowed: str = Form(""),
+    rules_note: str = Form(""),
+    min_relevance: float = Form(0.6),
+    delete: str = Form(""),
+):
+    with session_scope() as s:
+        t = s.get(RadarTarget, target_id)
+        if not t:
+            raise HTTPException(404, "no such target")
+        if delete:
+            s.delete(t)
+        else:
+            t.keywords = keywords
+            t.enabled = bool(enabled)
+            t.promo_allowed = bool(promo_allowed)
+            t.rules_note = rules_note
+            t.min_relevance = min_relevance
+    return RedirectResponse("/radar", status_code=303)
+
+
+@app.post("/radar/scan")
+def radar_scan_now():
+    from ..radar.scan import scan_all
+
+    _job("radar-scan", scan_all)
+    return RedirectResponse("/radar", status_code=303)
+
+
+@app.post("/radar/thread/{thread_id}/draft")
+def radar_draft(thread_id: int):
+    _job(f"draft#{thread_id}", _draft_job, thread_id)
+    return RedirectResponse("/radar", status_code=303)
+
+
+def _draft_job(thread_id: int) -> str:
+    from ..radar.reply import draft_reply
+
+    with session_scope() as s:
+        thread = s.get(RadarThread, thread_id)
+        if not thread:
+            return "thread gone"
+        target = (
+            s.query(RadarTarget)
+            .filter(RadarTarget.brand == thread.brand)
+            .filter(RadarTarget.source == thread.source)
+            .first()
+        )
+        links_allowed = bool(
+            thread.promo_allowed and target and target.promo_allowed
+        )
+        draft = draft_reply(thread, links_allowed)
+        if draft is None:
+            return "model declined - nothing useful to add"
+        s.add(draft)
+        return "drafted"
+
+
+@app.post("/radar/thread/{thread_id}/dismiss")
+def radar_dismiss(thread_id: int):
+    with session_scope() as s:
+        t = s.get(RadarThread, thread_id)
+        if t:
+            t.dismissed = True
+    return RedirectResponse("/radar", status_code=303)
+
+
+@app.post("/radar/draft/{draft_id}")
+def radar_draft_action(draft_id: int, action: str = Form(...), body: str = Form("")):
+    with session_scope() as s:
+        draft = s.get(ReplyDraft, draft_id)
+        if not draft:
+            raise HTTPException(404, "no such draft")
+
+        if action == "save":
+            draft.body = body
+        elif action == "reject":
+            draft.status = PostStatus.REJECTED
+        elif action == "send":
+            if body:
+                draft.body = body
+            _job(f"reply#{draft.id}", _send_reply_job, draft.id)
+        else:
+            raise HTTPException(400, f"unknown action {action!r}")
+    return RedirectResponse("/radar", status_code=303)
+
+
+def _send_reply_job(draft_id: int) -> str:
+    from ..radar import policy
+    from ..radar.reply import send_reply
+
+    with session_scope() as s:
+        draft = s.get(ReplyDraft, draft_id)
+        thread = s.get(RadarThread, draft.thread_id)
+        account = (
+            s.query(Account)
+            .filter(Account.brand == draft.brand, Account.platform == thread.source)
+            .first()
+        )
+        if account is None or not account.enabled:
+            draft.error = "no enabled account for this source"
+            return draft.error
+
+        target = (
+            s.query(RadarTarget)
+            .filter(RadarTarget.brand == thread.brand,
+                    RadarTarget.source == thread.source)
+            .first()
+        )
+        links_allowed = bool(thread.promo_allowed and target and target.promo_allowed)
+
+        # Re-check policy at send time: the body may have been edited in the UI
+        # since it was drafted.
+        problems = policy.blocking(
+            policy.check_reply(draft.body, draft.brand, links_allowed)
+        )
+        if problems:
+            draft.error = "blocked by policy: " + "; ".join(problems)
+            draft.status = PostStatus.REJECTED
+            return draft.error
+
+        dry = account.dry_run if account.dry_run is not None else settings.dry_run
+        try:
+            url = send_reply(draft, thread, account, dry)
+        except Exception as e:  # noqa: BLE001
+            draft.error = str(e)[:600]
+            draft.status = PostStatus.FAILED
+            return draft.error
+
+        draft.status = PostStatus.PUBLISHED
+        draft.posted_at = utcnow()
+        draft.remote_url = url
+        return url or "dry run"
+
+
+# ---------------------------------------------------------------------------
+# Brands
+# ---------------------------------------------------------------------------
+
+
+@app.get("/brands", response_class=HTMLResponse)
+def brands_page(request: Request):
+    raw = {}
+    for path in sorted(BRANDS_DIR.glob("*.yaml")):
+        raw[path.stem] = path.read_text()
+    return templates.TemplateResponse(
+        request, "brands.html", ctx(request, raw=raw))
+
+
+@app.post("/brands/{key}")
+def brand_save(key: str, content: str = Form(...)):
+    import yaml
+
+    path = BRANDS_DIR / f"{key}.yaml"
+    if not path.exists():
+        raise HTTPException(404, "no such brand")
+
+    # Validate before writing. A brand file that fails to parse takes the
+    # scheduler down at the next planning tick, so it must never be saved
+    # broken.
+    try:
+        yaml.safe_load(content)
+    except yaml.YAMLError as e:
+        raise HTTPException(400, f"invalid YAML: {e}") from None
+
+    backup = path.with_suffix(".yaml.bak")
+    backup.write_text(path.read_text())
+    path.write_text(content)
+    reload_brands()
+    try:
+        get_brand(key)
+    except Exception as e:  # noqa: BLE001 - roll back a semantically bad file
+        path.write_text(backup.read_text())
+        reload_brands()
+        raise HTTPException(400, f"rejected, restored previous: {e}") from None
+    return RedirectResponse("/brands", status_code=303)
+
+
+# ---------------------------------------------------------------------------
+# Settings
+# ---------------------------------------------------------------------------
+
+
+@app.get("/settings", response_class=HTMLResponse)
+def settings_page(request: Request):
+    from ..llm.client import available_models
+
+    with session_scope() as s:
+        overrides = {row.key: row.value for row in s.query(Setting).all()}
+    return templates.TemplateResponse(
+        request, "settings.html",
+        ctx(request, overrides=overrides, models=available_models(),
+            checkpoints=comfy.checkpoints(), unets=comfy.unet_models(),
+            vaes=comfy.list_options("VAELoader", "vae_name"),
+            clips=comfy.list_options("CLIPLoader", "clip_name"),
+            env_path=ROOT / ".env"),
+    )
+
+
+@app.post("/settings")
+async def settings_save(request: Request):
+    """Persist overrides to .env so they survive a restart.
+
+    Written as ADFORGE_<KEY>=value, which pydantic-settings reads on boot. The
+    running process is not hot-patched: a restart is required, and the UI says
+    so rather than pretending the change took effect.
+    """
+    form = await request.form()
+    env_path = ROOT / ".env"
+    existing = {}
+    if env_path.exists():
+        for line in env_path.read_text().splitlines():
+            if "=" in line and not line.strip().startswith("#"):
+                k, v = line.split("=", 1)
+                existing[k.strip()] = v.strip()
+
+    for key, value in form.items():
+        if not key.startswith("set_"):
+            continue
+        name = f"ADFORGE_{key[4:].upper()}"
+        existing[name] = str(value).strip()
+
+    # Checkboxes are absent from the form when unticked, so each one carries a
+    # hidden `bool_<name>_present` companion. The companion marks that the
+    # control was on the page; it is not itself a setting, so drive the loop
+    # from the companions and never write them out.
+    for key in list(form.keys()):
+        if key.startswith("bool_") and key.endswith("_present"):
+            name = key[len("bool_"):-len("_present")]
+            existing[f"ADFORGE_{name.upper()}"] = (
+                "true" if form.get(f"bool_{name}") else "false"
+            )
+
+    lines = ["# Written by the AdForge settings page. Restart to apply.\n"]
+    lines += [f"{k}={v}\n" for k, v in sorted(existing.items())]
+    env_path.write_text("".join(lines))
+    env_path.chmod(0o600)
+    return RedirectResponse("/settings?saved=1", status_code=303)
+
+
+# ---------------------------------------------------------------------------
+# Jobs
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/jobs")
+def api_jobs():
+    with JOBS_LOCK:
+        return JSONResponse(list(JOBS.values())[-30:])
+
+
+@app.post("/api/jobs/clear")
+def api_jobs_clear():
+    with JOBS_LOCK:
+        for jid in [j for j, v in JOBS.items() if v["state"] != "running"]:
+            JOBS.pop(jid, None)
+    return JSONResponse({"ok": True})

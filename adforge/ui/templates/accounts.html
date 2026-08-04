@@ -1,0 +1,221 @@
+{% extends "base.html" %}
+{% block title %}Accounts — AdForge{% endblock %}
+{% block body %}
+<h1>Accounts</h1>
+<p class="sub">Official platform APIs only. Credentials stay on this machine.</p>
+
+<div class="note">
+  <p>Everything is <strong>off and dry-run by default</strong>. An account only
+     transmits once you enable it <em>and</em> turn its dry-run off (or turn off
+     the global switch on <a href="/settings">Settings</a>).</p>
+  <p>Each adapter refuses to send when a required credential is missing, so a
+     half-configured account fails loudly instead of posting something broken.</p>
+</div>
+
+{% for acct in accounts %}
+{% set ready, detail = status[acct.id] %}
+{% set ps = platforms[acct.platform] %}
+<details class="acc" {{ 'open' if acct.enabled }}>
+  <summary>
+    <strong>{{ brands[acct.brand].name if acct.brand in brands else acct.brand }}</strong>
+    <span class="faint">→</span> {{ ps.label }}
+    {% if acct.enabled %}
+      {% if ready %}<span class="pill live">{{ detail }}</span>
+      {% else %}<span class="pill bad">not ready</span>{% endif %}
+    {% else %}
+      <span class="pill muted">disabled</span>
+    {% endif %}
+    {% if acct.handle %}<span class="faint">{{ acct.handle }}</span>{% endif %}
+    <span class="right faint">{{ acct.mode.value }}</span>
+  </summary>
+  <div>
+    {% if ps.notes %}
+      <div class="note warn"><p>{{ ps.notes }}</p></div>
+    {% endif %}
+
+    <form method="post" action="/accounts/{{ acct.id }}">
+      <div class="grid g3">
+        <div class="field">
+          <label>Handle / display name</label>
+          <input type="text" name="handle" value="{{ acct.handle }}"
+                 placeholder="@TheInferixAI">
+        </div>
+        <div class="field">
+          <label>Publishing mode</label>
+          <select name="mode">
+            <option value="AUTO" {{ 'selected' if acct.mode.value == 'AUTO' }}>
+              AUTO — publish after the review window
+            </option>
+            <option value="MANUAL" {{ 'selected' if acct.mode.value == 'MANUAL' }}>
+              MANUAL — require a click every time
+            </option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Transmission</label>
+          <select name="dry_run">
+            <option value="" {{ 'selected' if acct.dry_run is none }}>
+              inherit global ({{ 'dry run' if settings.dry_run else 'live' }})
+            </option>
+            <option value="1" {{ 'selected' if acct.dry_run == true }}>
+              dry run — build the request, send nothing
+            </option>
+            <option value="0" {{ 'selected' if acct.dry_run == false }}>
+              LIVE — actually publish
+            </option>
+          </select>
+        </div>
+      </div>
+
+      <label class="inline">
+        <input type="checkbox" name="enabled" {{ 'checked' if acct.enabled }}>
+        Account enabled
+      </label>
+
+      <h3 style="margin-top:16px">Credentials</h3>
+      <div class="grid g2">
+        {% for field in required.get(acct.platform, []) %}
+        <div class="field">
+          <label>{{ field }}</label>
+          <input type="password" name="cred_{{ field }}" autocomplete="off"
+                 placeholder="{{ '•••••• stored' if creds[acct.id].get(field) else 'not set' }}">
+          <div class="hint">
+            {% if creds[acct.id].get(field) %}
+              Stored. Leave blank to keep it; type to replace.
+            {% else %}
+              Required.
+            {% endif %}
+          </div>
+        </div>
+        {% endfor %}
+
+        {% if acct.platform == 'discord' %}
+          {% for field in ['webhook_url', 'bot_token', 'channel_id'] %}
+          <div class="field">
+            <label>{{ field }}</label>
+            <input type="password" name="cred_{{ field }}" autocomplete="off"
+                   placeholder="{{ '•••••• stored' if creds[acct.id].get(field) else 'not set' }}">
+          </div>
+          {% endfor %}
+          <div class="hint" style="grid-column:1/-1">
+            A webhook is enough to post announcements. The bot token is only
+            needed if you want the radar to read and reply in channels.
+          </div>
+        {% endif %}
+      </div>
+
+      {% if acct.platform == 'reddit' %}
+        <h3 style="margin-top:16px">Subreddit</h3>
+        <div class="note bad">
+          <p><strong>Read the subreddit's rules before enabling this.</strong>
+             Posting promotional content where it is not allowed gets the post
+             removed, then the account banned, then
+             <strong>inferix.co domain-banned sitewide</strong> — after which
+             nobody can link your site anywhere on Reddit. That last step is
+             effectively permanent.</p>
+        </div>
+        <div class="grid g3">
+          <div class="field">
+            <label>Subreddit <span class="faint">(without r/)</span></label>
+            <input type="text" name="opt_subreddit"
+                   value="{{ opts[acct.id].get('subreddit', '') }}"
+                   placeholder="LocalLLaMA">
+          </div>
+          <div class="field">
+            <label>Rules note <span class="faint">(for your own reference)</span></label>
+            <input type="text" name="opt_rules_note"
+                   value="{{ opts[acct.id].get('rules_note', '') }}"
+                   placeholder="self-promo allowed on Saturdays only">
+          </div>
+        </div>
+        <input type="hidden" name="optflag_allowed_present" value="1">
+        <input type="hidden" name="optflag_links_allowed_present" value="1">
+        <input type="hidden" name="optflag_allow_image_present" value="1">
+        <label class="inline">
+          <input type="checkbox" name="optflag_allowed"
+                 {{ 'checked' if opts[acct.id].get('allowed') }}>
+          I have read this subreddit's rules and posting here is permitted
+        </label>
+        <label class="inline">
+          <input type="checkbox" name="optflag_links_allowed"
+                 {{ 'checked' if opts[acct.id].get('links_allowed') }}>
+          Links are permitted here
+        </label>
+        <label class="inline">
+          <input type="checkbox" name="optflag_allow_image"
+                 {{ 'checked' if opts[acct.id].get('allow_image') }}>
+          Image posts are permitted
+        </label>
+      {% endif %}
+
+      {% if acct.platform == 'tiktok' %}
+        <h3 style="margin-top:16px">Publishing</h3>
+        <input type="hidden" name="optflag_direct_post_present" value="1">
+        <label class="inline">
+          <input type="checkbox" name="optflag_direct_post"
+                 {{ 'checked' if opts[acct.id].get('direct_post') }}>
+          My TikTok app has passed audit — publish directly
+        </label>
+        <div class="hint">
+          Leave this off unless TikTok has approved your app for the
+          <code class="mono">video.publish</code> scope. Unaudited apps can only
+          send to drafts; you finish posting in the TikTok app. Turning this on
+          without approval makes every upload fail.
+        </div>
+      {% endif %}
+
+      {% if acct.platform == 'instagram' %}
+        <h3 style="margin-top:16px">Media hosting</h3>
+        <div class="field">
+          <label>public_media_base</label>
+          <input type="text" name="cred_public_media_base"
+                 value="{{ creds[acct.id].get('public_media_base', '') }}"
+                 placeholder="https://s.inferix.co/adforge">
+          <div class="hint">
+            Instagram's API cannot accept a file upload — Meta's servers fetch
+            the media themselves, so this must be a public HTTPS URL serving
+            <code class="mono">data/assets/</code>. localhost will not work.
+          </div>
+        </div>
+      {% endif %}
+
+      {% if acct.platform == 'youtube' %}
+        <div class="field" style="margin-top:12px">
+          <label>Privacy</label>
+          <select name="opt_privacy">
+            {% for v in ['public', 'unlisted', 'private'] %}
+              <option value="{{ v }}" {{ 'selected' if opts[acct.id].get('privacy', 'public') == v }}>{{ v }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      {% endif %}
+
+      {% if acct.platform == 'linkedin' %}
+        <div class="hint" style="margin-top:10px">
+          <code class="mono">author_urn</code> is
+          <code class="mono">urn:li:organization:&lt;id&gt;</code> for a company page
+          (needs <code class="mono">w_organization_social</code>) or
+          <code class="mono">urn:li:person:&lt;id&gt;</code> for a personal profile
+          (<code class="mono">w_member_social</code>).
+        </div>
+      {% endif %}
+
+      {% if acct.platform == 'facebook' %}
+        <div class="hint" style="margin-top:10px">
+          This needs a <strong>page</strong> access token, not a user token — a
+          user token returns 200 on <code class="mono">/me</code> and 403 on the
+          page feed. Get it from <code class="mono">/me/accounts</code>.
+        </div>
+      {% endif %}
+
+      <div class="row" style="margin-top:16px">
+        <button class="primary" type="submit">Save account</button>
+        {% if not ready %}
+          <span class="faint">{{ detail }}</span>
+        {% endif %}
+      </div>
+    </form>
+  </div>
+</details>
+{% endfor %}
+{% endblock %}

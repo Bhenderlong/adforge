@@ -21,7 +21,7 @@ import logging
 import random
 import shlex
 import subprocess
-import textwrap
+
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -83,39 +83,78 @@ def probe_duration(path: Path) -> float:
     return int(hh) * 3600 + int(mm) * 60 + float(ss)
 
 
-def _escape_drawtext(s: str) -> str:
-    """ffmpeg drawtext needs colons, quotes, backslashes and % escaped."""
-    return (
-        s.replace("\\", r"\\\\")
-        .replace(":", r"\:")
-        .replace("'", r"\'")
-        .replace("%", r"\%")
-        .replace(",", r"\,")
-    )
+# Captions are rendered with Pillow into a transparent PNG and composited with
+# ffmpeg's `overlay`, rather than drawn with the `drawtext` filter.
+#
+# drawtext requires ffmpeg to be built against libfreetype, and the static
+# imageio-ffmpeg binary this project falls back to is not - the filter simply
+# does not exist and the render dies with "No such filter: 'drawtext'". Pillow
+# is already a dependency, always works, and gives real control over wrapping
+# and the text scrim.
+_FONT_CANDIDATES = [
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+    "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
+]
 
 
-def _caption_filter(text: str, w: int, h: int, wrap: int = 22) -> str:
-    """Bottom-third caption block with a readable scrim behind it."""
-    lines = textwrap.wrap(text.strip(), wrap)[:3]
-    if not lines:
-        return ""
-    size = max(34, int(w * 0.062))
-    line_h = int(size * 1.32)
+def _font(size: int):
+    from PIL import ImageFont
+
+    for path in _FONT_CANDIDATES:
+        if Path(path).exists():
+            return ImageFont.truetype(path, size)
+    log.warning("no bundled TTF found; captions will use a small bitmap font")
+    return ImageFont.load_default()
+
+
+def _caption_png(text: str, w: int, h: int, dst: Path) -> Path | None:
+    """Transparent overlay with the caption in the lower third."""
+    from PIL import Image, ImageDraw
+
+    words = text.strip()
+    if not words:
+        return None
+
+    size = max(30, int(w * 0.058))
+    font = _font(size)
+    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+
+    # Wrap to the actual rendered width rather than a character count, so long
+    # words and short words both lay out correctly.
+    max_w = int(w * 0.86)
+    lines, cur = [], ""
+    for word in words.split():
+        trial = f"{cur} {word}".strip()
+        if draw.textlength(trial, font=font) <= max_w or not cur:
+            cur = trial
+        else:
+            lines.append(cur)
+            cur = word
+    if cur:
+        lines.append(cur)
+    lines = lines[:3]
+
+    line_h = int(size * 1.34)
     block_h = line_h * len(lines)
-    top = int(h * 0.70) - block_h // 2
+    top = int(h * 0.72) - block_h // 2
+    pad = int(size * 0.55)
 
-    parts = [
-        f"drawbox=x=0:y={top - 28}:w={w}:h={block_h + 56}:"
-        f"color=black@0.55:t=fill"
-    ]
+    draw.rectangle(
+        [0, top - pad, w, top + block_h + pad], fill=(0, 0, 0, 140)
+    )
     for i, line in enumerate(lines):
-        parts.append(
-            f"drawtext=text='{_escape_drawtext(line)}':"
-            f"fontcolor=white:fontsize={size}:"
-            f"borderw={max(3, size // 14)}:bordercolor=black@0.9:"
-            f"x=(w-text_w)/2:y={top + i * line_h}"
+        tw = draw.textlength(line, font=font)
+        x, y = (w - tw) / 2, top + i * line_h
+        draw.text(
+            (x, y), line, font=font, fill=(255, 255, 255, 255),
+            stroke_width=max(2, size // 16), stroke_fill=(0, 0, 0, 230),
         )
-    return ",".join(parts)
+
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    img.save(dst)
+    return dst
 
 
 def _still_to_motion(still: Path, dst: Path, seconds: float, w: int, h: int,
@@ -224,7 +263,7 @@ def render_scene(
             )
             with gpu(MEDIA):
                 files = comfy.run(graph)
-            raw = ASSETS / f"{slug}_wan.webp"
+            raw = ASSETS / f"{slug}_wan.webm"
             comfy.fetch(files[0], raw)
             _extend_clip(raw, motion, scene.seconds, w, h)
             raw.unlink(missing_ok=True)
@@ -237,17 +276,21 @@ def render_scene(
     if not made:
         _still_to_motion(scene.still, motion, scene.seconds, w, h)
 
-    if not scene.caption.strip():
+    overlay = _caption_png(scene.caption, w, h, ASSETS / f"{slug}_cap.png")
+    if overlay is None:
+        scene.clip = motion
         return motion
 
     out = ASSETS / f"{slug}_beat.mp4"
     _run([
-        settings.ffmpeg, "-y", "-loglevel", "error", "-i", str(motion),
-        "-vf", _caption_filter(scene.caption, w, h),
+        settings.ffmpeg, "-y", "-loglevel", "error",
+        "-i", str(motion), "-i", str(overlay),
+        "-filter_complex", "[0:v][1:v]overlay=0:0:format=auto",
         "-c:v", "libx264", "-preset", "medium", "-crf", "20",
         "-pix_fmt", "yuv420p", str(out),
     ])
     motion.unlink(missing_ok=True)
+    overlay.unlink(missing_ok=True)
     scene.clip = out
     return out
 

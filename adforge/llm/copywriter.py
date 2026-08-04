@@ -102,6 +102,39 @@ def critique(text: str, brand: Brand, ps: PlatformSpec, pillar: Pillar) -> dict:
         return {"overall": 6.0, "verdict": "PASS", "problems": [], "fix": ""}
 
 
+def factcheck(text: str, brand: Brand) -> list[str]:
+    """Product claims in the copy that the brand profile does not support.
+
+    The deterministic gate catches invented *numbers* ("25% faster"), but not
+    invented *mechanics* - a real generation asserted "verification requires a
+    one-time 10-minute test", which is a plausible-sounding process that does
+    not exist. Only a model comparing the copy against the approved claims
+    catches that class of error.
+    """
+    try:
+        data = chat_json(
+            prompts.factcheck_prompt(text, brand),
+            models=settings.critic_chain,
+            temperature=0.1,
+            max_tokens=600,
+        )
+    except LLMError as e:
+        log.warning("factcheck failed, allowing through: %s", e)
+        return []
+
+    out = []
+    for item in data.get("unsupported", []) or []:
+        if isinstance(item, dict):
+            claim = str(item.get("claim", "")).strip()
+            why = str(item.get("why", "")).strip()
+            if claim:
+                out.append(f"unsupported claim {claim!r}: {why}" if why
+                           else f"unsupported claim {claim!r}")
+        elif str(item).strip():
+            out.append(f"unsupported claim: {str(item).strip()}")
+    return out
+
+
 def _score_of(verdict: dict) -> float:
     if isinstance(verdict.get("overall"), (int, float)):
         return float(verdict["overall"])
@@ -175,6 +208,27 @@ def _write_post(brand, ps, pillar, angle, recent, rng) -> Draft:
             if cand.score > best.score:
                 best = cand
             log.info("attempt %d blocked: %s", attempt, "; ".join(problems[:3]))
+            continue
+
+        # Claims the brand profile does not support. Treated as blocking: a
+        # confident invented specific is worse than a bland post, because a
+        # reader who acts on it finds the product does not work that way.
+        unsupported = factcheck(text, brand)
+        if unsupported:
+            problems = unsupported
+            fix = (
+                "Remove or replace every unsupported claim listed. State only "
+                "what the approved claims support; if you do not have a "
+                "specific, leave it out rather than inventing one."
+            )
+            cand = Draft(
+                text=text, score=0.0, passed=False,
+                notes="; ".join(unsupported[:4]), problems=problems,
+                violations=vs, attempts=attempt, angle=angle,
+            )
+            if cand.score > best.score:
+                best = cand
+            log.info("attempt %d unsupported: %s", attempt, "; ".join(unsupported[:2]))
             continue
 
         verdict = critique(text, brand, ps, pillar)

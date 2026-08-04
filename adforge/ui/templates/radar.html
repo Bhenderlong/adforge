@@ -1,0 +1,221 @@
+{% extends "base.html" %}
+{% block title %}Radar — AdForge{% endblock %}
+{% block body %}
+<div class="row">
+  <div>
+    <h1>Conversation radar</h1>
+    <p class="sub">Threads on Reddit and Discord where your product is a real answer.</p>
+  </div>
+  <div class="right row">
+    <form method="post" action="/radar/scan"><button class="primary">Scan now</button></form>
+  </div>
+</div>
+
+<div class="note">
+  <p><strong>How this works.</strong> Keyword prefilter over recent threads, then
+     a model scores whether the product genuinely answers the question. Anything
+     above the target's threshold can be drafted a reply. <strong>Every reply
+     carries a disclosure and requires your approval before it is sent.</strong></p>
+  <p>Replies that pose as an unaffiliated happy user are not generated, and the
+     policy check blocks them if a model produces one anyway. Undisclosed
+     endorsements by a company's own people breach the FTC Endorsement Guides
+     (16 CFR Part 255), and on Reddit they escalate to a sitewide domain ban that
+     would stop anyone linking your site anywhere on the platform. Disclosed,
+     genuinely useful replies survive; astroturf gets removed.</p>
+</div>
+
+<h2>Targets</h2>
+<div class="grid g2">
+  {% for t in targets %}
+  <div class="card">
+    <form method="post" action="/radar/targets/{{ t.id }}">
+      <div class="row">
+        <strong>{{ 'r/' ~ t.target if t.source == 'reddit' else t.target }}</strong>
+        <span class="pill muted">{{ t.source }}</span>
+        <span class="pill info">{{ t.brand }}</span>
+        {% if not t.enabled %}<span class="pill muted">paused</span>{% endif %}
+      </div>
+      <div class="field" style="margin-top:8px">
+        <label>Keywords <span class="faint">(comma separated, matched case-insensitively)</span></label>
+        <input type="text" name="keywords" value="{{ t.keywords }}">
+      </div>
+      <div class="row">
+        <div style="flex:1">
+          <label>Minimum relevance</label>
+          <input type="number" name="min_relevance" step="0.05" min="0" max="1"
+                 value="{{ t.min_relevance }}">
+        </div>
+        <div style="flex:2">
+          <label>Rules note</label>
+          <input type="text" name="rules_note" value="{{ t.rules_note }}"
+                 placeholder="what this community allows">
+        </div>
+      </div>
+      <label class="inline">
+        <input type="checkbox" name="enabled" {{ 'checked' if t.enabled }}> Scanning
+      </label>
+      <label class="inline">
+        <input type="checkbox" name="promo_allowed" {{ 'checked' if t.promo_allowed }}>
+        Links permitted here
+      </label>
+      <div class="row" style="margin-top:8px">
+        <button class="sm primary">Save</button>
+        <button class="sm danger" name="delete" value="1"
+                onclick="return confirm('Remove this target?')">Remove</button>
+      </div>
+    </form>
+  </div>
+  {% else %}
+    <div class="card"><p class="faint">No targets yet. Add one below.</p></div>
+  {% endfor %}
+</div>
+
+<details class="acc" style="margin-top:14px">
+  <summary>Add a target</summary>
+  <div>
+    <form method="post" action="/radar/targets/new">
+      <div class="grid g4">
+        <div class="field">
+          <label>Brand</label>
+          <select name="brand">
+            {% for k, b in brands.items() %}<option value="{{ k }}">{{ b.name }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label>Source</label>
+          <select name="source">
+            <option value="reddit">Reddit</option>
+            <option value="discord">Discord</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Target</label>
+          <input type="text" name="target" placeholder="LocalLLaMA — or guild_id/channel_id">
+        </div>
+        <div class="field">
+          <label>Minimum relevance</label>
+          <input type="number" name="min_relevance" step="0.05" min="0" max="1" value="0.6">
+        </div>
+      </div>
+      <div class="field">
+        <label>Keywords</label>
+        <input type="text" name="keywords"
+               placeholder="gpu cloud, inference endpoint, vllm, model hosting">
+      </div>
+      <div class="field">
+        <label>Rules note</label>
+        <input type="text" name="rules_note"
+               placeholder="e.g. self-promotion allowed only in the weekly thread">
+      </div>
+      <label class="inline">
+        <input type="checkbox" name="promo_allowed">
+        I have read this community's rules and links are permitted
+      </label>
+      <div style="margin-top:10px"><button class="primary">Add target</button></div>
+    </form>
+  </div>
+</details>
+
+<h2>Threads</h2>
+<form method="get" class="card tight" style="margin-bottom:14px">
+  <div class="row">
+    <div style="min-width:170px">
+      <label>Brand</label>
+      <select name="brand" onchange="this.form.submit()">
+        <option value="">all</option>
+        {% for k, b in brands.items() %}
+          <option value="{{ k }}" {{ 'selected' if f_brand == k }}>{{ b.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div style="min-width:170px">
+      <label>Minimum relevance</label>
+      <input type="number" name="min_rel" step="0.05" min="0" max="1" value="{{ f_min }}"
+             onchange="this.form.submit()">
+    </div>
+  </div>
+</form>
+
+{% for t in threads %}
+{% set d = drafts.get(t.id) %}
+<div class="card" style="margin-bottom:12px">
+  <div class="row">
+    <span class="score {{ 'hi' if t.relevance >= 0.75 else ('mid' if t.relevance >= 0.5 else 'lo') }}"
+          style="font-size:18px">{{ '%.2f'|format(t.relevance) }}</span>
+    <div style="flex:1">
+      <strong>{{ t.title[:160] }}</strong><br>
+      <span class="faint">{{ t.where }} · u/{{ t.author }}
+        {%- if t.posted_at %} · {{ t.posted_at.strftime('%d %b %H:%M') }}{% endif %}</span>
+    </div>
+    <a class="btn sm" href="{{ t.url }}" target="_blank" rel="noopener">open thread</a>
+  </div>
+
+  {% if t.matched_keywords %}
+    <div style="margin-top:6px">
+      {% for k in t.matched_keywords.split(',') %}<span class="tag">{{ k }}</span>{% endfor %}
+    </div>
+  {% endif %}
+
+  {% if t.score_reason %}<p class="faint" style="margin:8px 0 0">{{ t.score_reason }}</p>{% endif %}
+
+  {% if t.excerpt %}
+  <details class="acc" style="margin-top:8px">
+    <summary>Thread text</summary>
+    <div class="faint" style="white-space:pre-wrap">{{ t.excerpt[:1500] }}</div>
+  </details>
+  {% endif %}
+
+  {% if d %}
+    <div style="margin-top:10px; border-top:1px solid var(--line); padding-top:10px">
+      <div class="row">
+        <strong>Drafted reply</strong>
+        <span class="pill st-{{ d.status.value }}">{{ d.status.value }}</span>
+        {% if not t.promo_allowed %}
+          <span class="pill warn" title="This target is not marked as permitting links">no links</span>
+        {% endif %}
+      </div>
+      {% if d.critic_notes %}
+        <p class="faint {{ 'pill bad' if 'STILL FAILING' in d.critic_notes }}"
+           style="margin:6px 0">{{ d.critic_notes }}</p>
+      {% endif %}
+      {% if d.error %}<p class="pill bad">{{ d.error }}</p>{% endif %}
+
+      {% if d.status.value in ('REVIEW', 'DRAFT') %}
+      <form method="post" action="/radar/draft/{{ d.id }}">
+        <textarea name="body" style="min-height:150px">{{ d.body }}</textarea>
+        <p class="hint">
+          This is appended automatically at send time and cannot be removed:
+          <strong>{{ d.disclosure }}</strong>
+        </p>
+        <div class="row">
+          <button class="sm" name="action" value="save">Save edit</button>
+          <button class="sm primary" name="action" value="send"
+                  onclick="return confirm('Send this reply? It is checked against policy again first.')">
+            Approve &amp; send
+          </button>
+          <button class="sm danger" name="action" value="reject">Reject</button>
+        </div>
+      </form>
+      {% else %}
+        <p style="white-space:pre-wrap">{{ d.body }}</p>
+        {% if d.remote_url %}<a href="{{ d.remote_url }}" target="_blank" rel="noopener">view reply</a>{% endif %}
+      {% endif %}
+    </div>
+  {% else %}
+    <div class="row" style="margin-top:10px">
+      <form method="post" action="/radar/thread/{{ t.id }}/draft">
+        <button class="sm primary">Draft a reply</button>
+      </form>
+      <form method="post" action="/radar/thread/{{ t.id }}/dismiss">
+        <button class="sm">Dismiss</button>
+      </form>
+    </div>
+  {% endif %}
+</div>
+{% else %}
+  <div class="card"><p class="faint">
+    No threads found yet. Add a target above and hit <em>Scan now</em>. The
+    scanner also runs every {{ settings.radar_interval_minutes }} minutes.
+  </p></div>
+{% endfor %}
+{% endblock %}

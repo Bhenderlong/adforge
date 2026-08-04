@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}AdForge{% endblock %}</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<nav class="nav">
+  <a class="brand" href="/">Ad<span>Forge</span></a>
+  <a href="/" class="{{ 'on' if request.url.path == '/' }}">Dashboard</a>
+  <a href="/queue" class="{{ 'on' if request.url.path.startswith('/queue') or request.url.path.startswith('/post') }}">Queue</a>
+  <a href="/compose" class="{{ 'on' if request.url.path == '/compose' }}">Compose</a>
+  <a href="/schedules" class="{{ 'on' if request.url.path.startswith('/schedules') }}">Schedules</a>
+  <a href="/radar" class="{{ 'on' if request.url.path.startswith('/radar') }}">Radar</a>
+  <a href="/accounts" class="{{ 'on' if request.url.path.startswith('/accounts') }}">Accounts</a>
+  <a href="/brands" class="{{ 'on' if request.url.path.startswith('/brands') }}">Brands</a>
+  <a href="/settings" class="{{ 'on' if request.url.path.startswith('/settings') }}">Settings</a>
+  <span class="spacer"></span>
+  {% if settings.dry_run %}
+    <span class="pill warn" title="Global dry run is ON. Nothing is transmitted to any platform.">DRY RUN</span>
+  {% else %}
+    <span class="pill live" title="Global dry run is OFF. Enabled accounts will publish for real.">LIVE</span>
+  {% endif %}
+  <span id="gpu-pill" class="pill muted">GPU —</span>
+</nav>
+
+<main>
+{% block body %}{% endblock %}
+</main>
+
+<div id="jobbar" class="jobbar hidden">
+  <strong>Running</strong> <span id="joblist"></span>
+</div>
+
+<script>
+// Poll status so the GPU pill and the running-jobs bar stay honest without a
+// full page reload. Generation can take minutes; the user needs to see that
+// something is actually happening.
+async function poll() {
+  try {
+    const r = await fetch('/api/status');
+    if (!r.ok) return;
+    const d = await r.json();
+    const pill = document.getElementById('gpu-pill');
+    if (d.vram && d.vram.length) {
+      const used = d.vram.map(g => g.pct + '%').join(' / ');
+      pill.textContent = 'GPU ' + used + (d.gpu_mode ? ' · ' + d.gpu_mode : '');
+      pill.className = 'pill ' + (d.vram.some(g => g.pct > 90) ? 'warn' : 'muted');
+    }
+    const running = (d.jobs || []).filter(j => j.state === 'running');
+    const bar = document.getElementById('jobbar');
+    if (running.length) {
+      document.getElementById('joblist').textContent =
+        running.map(j => j.name).join(', ');
+      bar.classList.remove('hidden');
+    } else {
+      bar.classList.add('hidden');
+    }
+  } catch (e) { /* transient; next tick retries */ }
+}
+poll();
+setInterval(poll, 4000);
+
+// Character counters for any textarea declaring a limit.
+document.querySelectorAll('textarea[data-limit]').forEach(function (ta) {
+  const limit = parseInt(ta.dataset.limit, 10);
+  const out = document.querySelector(ta.dataset.counter);
+  if (!out) return;
+  const upd = () => {
+    const n = ta.value.length;
+    out.textContent = n + ' / ' + limit;
+    out.className = 'counter' + (n > limit ? ' over' : (n > limit * 0.9 ? ' near' : ''));
+  };
+  ta.addEventListener('input', upd);
+  upd();
+});
+</script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

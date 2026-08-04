@@ -1,0 +1,177 @@
+{% extends "base.html" %}
+{% block title %}Post {{ post.id }} — AdForge{% endblock %}
+{% block body %}
+<div class="row">
+  <div>
+    <h1>{{ brands[post.brand].name if post.brand in brands else post.brand }}
+        → {{ ps.label }}</h1>
+    <p class="sub">
+      <span class="pill st-{{ post.status.value }}">{{ post.status.value }}</span>
+      <span class="pill muted">{{ post.mode.value }}</span>
+      {% if post.pillar %}<span class="tag">{{ post.pillar }}</span>{% endif %}
+      <span class="faint">post #{{ post.id }}</span>
+    </p>
+  </div>
+  <div class="right"><a class="btn" href="/queue">← queue</a></div>
+</div>
+
+{% if post.status.value == 'REVIEW' and post.review_until %}
+<div class="note warn">
+  <p>This auto-approves at
+     <strong>{{ post.review_until.strftime('%d %b %H:%M') }} UTC</strong> unless you
+     act. Use <em>Hold</em> to stop the clock while you decide.</p>
+</div>
+{% endif %}
+
+{% if post.critic_notes %}
+<div class="note {{ 'bad' if 'below quality bar' in post.critic_notes else '' }}">
+  <p><strong>Editor notes.</strong> {{ post.critic_notes }}</p>
+</div>
+{% endif %}
+
+{% if post.error %}
+<div class="note bad"><p><strong>Last error.</strong> {{ post.error }}
+   <span class="faint">({{ post.attempts }} attempt(s))</span></p></div>
+{% endif %}
+
+<div class="grid g2">
+  <div class="card">
+    <h3>Copy</h3>
+    <form method="post" action="/post/{{ post.id }}/edit">
+      {% if ps.key in ('reddit', 'youtube') %}
+      <div class="field">
+        <label>Title <span class="faint">(required on {{ ps.label }})</span></label>
+        <input type="text" name="title" value="{{ post.title }}">
+      </div>
+      {% else %}
+        <input type="hidden" name="title" value="{{ post.title }}">
+      {% endif %}
+
+      <div class="field">
+        <label>Body <span id="cc" class="counter"></span></label>
+        <textarea name="body" data-limit="{{ ps.max_chars }}" data-counter="#cc"
+                  style="min-height:220px">{{ post.body }}</textarea>
+        <div class="hint">{{ ps.register }}</div>
+      </div>
+
+      <div class="field">
+        <label>Hashtags <span class="faint">(comma separated, no #)</span></label>
+        <input type="text" name="hashtags" value="{{ post.hashtags }}">
+        <div class="hint">
+          {% if ps.hashtags[1] == 0 %}
+            {{ ps.label }} treats hashtags as spam. Leave this empty.
+          {% else %}
+            {{ ps.hashtags[0] }}–{{ ps.hashtags[1] }} reads as native here.
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Link</label>
+        <input type="text" name="link" value="{{ post.link }}">
+        <div class="hint">
+          {% if ps.link_policy == 'unclickable' %}
+            Not clickable on {{ ps.label }} — kept out of the body; use the bio link.
+          {% elif ps.link_policy == 'demoted' %}
+            {{ ps.label }} demotes body links, so this is posted as the first comment.
+          {% else %}
+            Included in the post body.
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Scheduled for <span class="faint">(local time)</span></label>
+        <input type="datetime-local" name="scheduled_for"
+               value="{{ post.scheduled_for.strftime('%Y-%m-%dT%H:%M') if post.scheduled_for else '' }}">
+      </div>
+
+      <button class="primary" type="submit">Save changes</button>
+    </form>
+  </div>
+
+  <div>
+    <div class="card">
+      <h3>Media</h3>
+      {% if post.video_path %}
+        <video class="thumb" controls preload="metadata"
+               src="/asset/{{ post.video_path.split('/')[-1] }}"></video>
+        <p class="faint mono">{{ post.video_path.split('/')[-1] }}</p>
+      {% elif post.image_path %}
+        <img class="thumb" src="/asset/{{ post.image_path.split('/')[-1] }}" alt="">
+        <p class="faint mono">{{ post.image_path.split('/')[-1] }}
+           — {{ ps.image_size[0] }}×{{ ps.image_size[1] }}</p>
+      {% else %}
+        <p class="faint">No media attached.</p>
+      {% endif %}
+
+      {% if post.media_prompt %}
+      <details class="acc" style="margin-top:10px">
+        <summary>Image prompt</summary>
+        <div class="faint mono">{{ post.media_prompt }}</div>
+      </details>
+      {% endif %}
+
+      {% if ps.supports_image and not post.video_path %}
+      <form method="post" action="/post/{{ post.id }}/action" style="margin-top:10px">
+        <input type="hidden" name="action" value="regenerate_media">
+        <button class="sm">Regenerate image</button>
+      </form>
+      {% endif %}
+    </div>
+
+    <div class="card" style="margin-top:14px">
+      <h3>Actions</h3>
+      <div class="row">
+        {% for act, label, cls in [
+            ('approve', 'Approve', 'primary'),
+            ('hold', 'Hold for review', ''),
+            ('publish_now', 'Publish now', ''),
+            ('regenerate', 'Rewrite copy', ''),
+            ('reject', 'Reject', 'danger'),
+            ('delete', 'Delete', 'danger')] %}
+          <form method="post" action="/post/{{ post.id }}/action">
+            <input type="hidden" name="action" value="{{ act }}">
+            <button class="{{ cls }}"
+              {% if act == 'delete' %}onclick="return confirm('Delete this post permanently?')"{% endif %}
+              {% if act == 'publish_now' %}onclick="return confirm('Publish immediately? If this account is live, it goes out now.')"{% endif %}
+            >{{ label }}</button>
+          </form>
+        {% endfor %}
+      </div>
+      <p class="hint">
+        {% if account %}
+          Destination: <strong>{{ account.handle or account.platform }}</strong> —
+          {% if account.dry_run is none %}
+            inheriting global {{ 'DRY RUN' if settings.dry_run else 'LIVE' }}
+          {% elif account.dry_run %}dry run{% else %}<strong>live</strong>{% endif %}
+        {% else %}
+          No account attached — this post cannot publish.
+        {% endif %}
+      </p>
+    </div>
+
+    <div class="card" style="margin-top:14px">
+      <h3>Provenance</h3>
+      <table>
+        <tr><td class="faint">Quality</td><td>
+          <span class="score {{ 'hi' if post.quality_score >= 7.5 else ('mid' if post.quality_score >= 6 else 'lo') }}">
+            {{ '%.1f'|format(post.quality_score or 0) }} / 10</span></td></tr>
+        {% if meta.get('attempts') %}
+        <tr><td class="faint">Rewrites</td><td>{{ meta.attempts }}</td></tr>
+        {% endif %}
+        {% if meta.get('angle') %}
+        <tr><td class="faint">Angle</td><td class="faint">{{ meta.angle }}</td></tr>
+        {% endif %}
+        <tr><td class="faint">Created</td><td class="faint mono">{{ post.created_at.strftime('%d %b %H:%M') if post.created_at }}</td></tr>
+        {% if post.published_at %}
+        <tr><td class="faint">Published</td><td class="faint mono">{{ post.published_at.strftime('%d %b %H:%M') }}</td></tr>
+        {% endif %}
+        {% if post.remote_url %}
+        <tr><td class="faint">Live at</td><td><a href="{{ post.remote_url }}" target="_blank" rel="noopener">{{ post.remote_url[:60] }}</a></td></tr>
+        {% endif %}
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

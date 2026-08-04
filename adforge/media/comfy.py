@@ -19,6 +19,8 @@ import urllib.request
 import uuid
 from pathlib import Path
 
+import httpx
+
 from ..config import settings
 
 log = logging.getLogger("adforge.comfy")
@@ -182,34 +184,24 @@ def build_txt2img(
 
 
 def upload_image(path: Path, subfolder: str = "adforge") -> str:
-    """Upload a local image into the engine's input dir; returns its handle."""
-    boundary = uuid.uuid4().hex
-    data = path.read_bytes()
-    body = b"".join(
-        [
-            f"--{boundary}\r\n".encode(),
-            f'Content-Disposition: form-data; name="image"; filename="{path.name}"\r\n'.encode(),
-            b"Content-Type: application/octet-stream\r\n\r\n",
-            data,
-            f"\r\n--{boundary}\r\n".encode(),
-            b'Content-Disposition: form-data; name="subfolder"\r\n\r\n',
-            subfolder.encode(),
-            f"\r\n--{boundary}\r\n".encode(),
-            b'Content-Disposition: form-data; name="overwrite"\r\n\r\n',
-            b"true",
-            f"\r\n--{boundary}--\r\n".encode(),
-        ]
-    )
-    req = urllib.request.Request(
-        _url("/upload/image"),
-        data=body,
-        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
-    )
-    with urllib.request.urlopen(req, timeout=120) as r:
-        out = json.load(r)
-    name = out["name"]
+    """Upload a local image into the engine's input dir; returns its handle.
+
+    Uses httpx rather than a hand-built multipart body - getting the boundary
+    and CRLF framing exactly right by hand is easy to get subtly wrong, and
+    ComfyUI answers a malformed body with a bare 500 that says nothing about
+    what was wrong with it.
+    """
+    with httpx.Client(timeout=180) as client:
+        r = client.post(
+            _url("/upload/image"),
+            files={"image": (path.name, path.read_bytes(), "image/png")},
+            data={"subfolder": subfolder, "overwrite": "true"},
+        )
+    if r.status_code >= 400:
+        raise ComfyError(f"image upload failed [{r.status_code}]: {r.text[:300]}")
+    out = r.json()
     sub = out.get("subfolder", "")
-    return f"{sub}/{name}" if sub else name
+    return f"{sub}/{out['name']}" if sub else out["name"]
 
 
 def build_i2v(
@@ -273,8 +265,11 @@ def build_i2v(
                           "latent_image": ["9", 0]}},
         "11": {"class_type": "VAEDecode",
                "inputs": {"samples": ["10", 0], "vae": ["4", 0]}},
-        "12": {"class_type": "SaveAnimatedWEBP",
+        # SaveWEBM (VP9), not SaveAnimatedWEBP. Animated WebP needs libwebp's
+        # animated demuxer, which the static imageio-ffmpeg build lacks - it
+        # rejects the file with "Decode error rate 1 exceeds maximum" and the
+        # clip is unusable. VP9-in-WebM decodes everywhere.
+        "12": {"class_type": "SaveWEBM",
                "inputs": {"images": ["11", 0], "filename_prefix": "adforge_clip",
-                          "fps": fps, "lossless": False, "quality": 90,
-                          "method": "default"}},
+                          "codec": "vp9", "fps": float(fps), "crf": 28.0}},
     }

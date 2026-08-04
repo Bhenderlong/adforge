@@ -104,7 +104,11 @@ class Settings(BaseSettings):
     # the engine reports for UNETLoader/VAELoader/CLIPLoader.
     wan_high_noise: str = "wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors"
     wan_low_noise: str = "wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors"
-    wan_vae: str = "wan2.2_vae.safetensors"
+    # MUST be the 2.1 VAE despite the 2.2 model names. wan2.2_vae belongs to
+    # the TI2V-5B variant and has a different latent channel count; pairing it
+    # with the 14B i2v experts fails inside KSamplerAdvanced with
+    # "expected input[...] to have 36 channels, but got 64 channels instead".
+    wan_vae: str = "wan_2.1_vae.safetensors"
     wan_text_encoder: str = "umt5_xxl_fp8_e4m3fn_scaled.safetensors"
     # Frames per generated clip. Wan wants 4n+1; 49 @ 16fps is ~3s of motion,
     # which is then held/cross-faded to fill a 30-40s short.

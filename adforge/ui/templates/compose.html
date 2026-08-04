@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}Compose — AdForge{% endblock %}
+{% block body %}
+<h1>Compose</h1>
+<p class="sub">Generate a one-off post outside the schedule.</p>
+
+<div class="card" style="max-width:760px">
+  <form method="post" action="/compose">
+    <div class="grid g2">
+      <div class="field">
+        <label>Brand</label>
+        <select name="brand" id="brand">
+          {% for k, b in brands.items() %}
+            <option value="{{ k }}">{{ b.name }} — {{ b.tagline }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label>Platform</label>
+        <select name="platform">
+          {% for k, p in platforms.items() %}
+            <option value="{{ k }}">{{ p.label }} ({{ p.max_chars }} chars)</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Content pillar <span class="faint">(blank = pick by weight)</span></label>
+      <select name="pillar">
+        <option value="">— automatic —</option>
+        {% for k, b in brands.items() %}
+          <optgroup label="{{ b.name }}">
+            {% for pil in b.pillars %}
+              <option value="{{ pil.key }}">{{ pil.label }}</option>
+            {% endfor %}
+          </optgroup>
+        {% endfor %}
+      </select>
+      <div class="hint">A pillar from the other brand is ignored — the brand's
+        own pillar set is what applies.</div>
+    </div>
+
+    <div class="field">
+      <label>Angle <span class="faint">(optional — leave blank and one is generated)</span></label>
+      <textarea name="angle" style="min-height:90px"
+        placeholder="Be specific about what the post should say. e.g. 'Continuous batching raises throughput until the KV cache stops fitting in VRAM — show how to compute the cache size for a given model and context length.'"></textarea>
+      <div class="hint">Do not put invented statistics here; the fabricated-metric
+        check will block the resulting post.</div>
+    </div>
+
+    <div class="field">
+      <label>Publish at <span class="faint">(local time; blank = now, still held for review)</span></label>
+      <input type="datetime-local" name="when">
+    </div>
+
+    <label class="inline">
+      <input type="checkbox" name="with_media" value="1" checked>
+      Generate an image for it
+    </label>
+
+    <div style="margin-top:14px">
+      <button class="primary" type="submit">Generate</button>
+      <span class="faint" style="margin-left:10px">
+        Runs in the background — takes a minute or two on a 70B model, longer
+        with media. Watch the queue.
+      </span>
+    </div>
+  </form>
+</div>
+
+<div class="note" style="max-width:760px">
+  <p>Generated posts land in <strong>REVIEW</strong> as MANUAL, so nothing
+     composed here publishes without an explicit approval.</p>
+</div>
+{% endblock %}

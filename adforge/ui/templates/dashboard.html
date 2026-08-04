@@ -1,0 +1,179 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>Dashboard</h1>
+<p class="sub">Two brands, {{ platforms|length }} destinations, generated locally.</p>
+
+<div class="grid g4">
+  {% for key, label in [('REVIEW','In review'), ('APPROVED','Approved'),
+                        ('PUBLISHED','Published'), ('FAILED','Failed')] %}
+  <div class="card">
+    <div class="metric-label">{{ label }}</div>
+    <div class="metric" id="count-{{ key }}">{{ counts.get(key, 0) }}</div>
+  </div>
+  {% endfor %}
+</div>
+
+<h2>System</h2>
+<div class="grid g3">
+  <div class="card">
+    <h3>Inference</h3>
+    <p>
+      {% if llm_ok %}<span class="pill live">UP</span>{% else %}<span class="pill bad">DOWN</span>{% endif %}
+      <span class="faint">{{ settings.llm_backend }}</span>
+    </p>
+    <p class="faint">{{ llm_msg }}</p>
+    <p class="faint mono">writer: {{ settings.model_writer }}<br>
+       critic: {{ settings.model_critic }}<br>
+       fast: {{ settings.model_fast }}</p>
+  </div>
+
+  <div class="card">
+    <h3>Image / video engine</h3>
+    <p>
+      {% if comfy_ok %}<span class="pill live">UP</span>{% else %}<span class="pill bad">DOWN</span>{% endif %}
+      <span class="faint mono">{{ settings.comfy_url }}</span>
+    </p>
+    <p class="faint">Video generation is {{ 'on' if settings.enable_video else 'off' }}.</p>
+    {% if not comfy_ok %}
+    <p class="faint">Start it with <code class="mono">bash ~/adstudio/scripts/run_comfy.sh</code>.
+       Posts still generate without it; they just go out without media.</p>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h3>GPU</h3>
+    {% for g in vram %}
+      <div style="margin-bottom:8px">
+        <div class="faint">GPU{{ g.index }} — {{ (g.used_mb/1024)|round(1) }} / {{ (g.total_mb/1024)|round(0)|int }} GB</div>
+        <div class="bar"><i style="width:{{ g.pct }}%"></i></div>
+      </div>
+    {% else %}
+      <p class="faint">nvidia-smi not available.</p>
+    {% endfor %}
+    <p class="faint">Mode: <strong>{{ gpu_mode or 'idle' }}</strong> —
+      text and media generation take turns, because a 70B writer and a loaded
+      ComfyUI checkpoint do not fit at the same time.</p>
+  </div>
+</div>
+
+<h2>Live destinations</h2>
+{% if live %}
+<div class="card tight">
+<table>
+  <thead><tr><th>Brand</th><th>Platform</th><th>Handle</th><th>Mode</th><th>State</th></tr></thead>
+  <tbody>
+  {% for acct, ready, detail in live %}
+    <tr>
+      <td>{{ brands[acct.brand].name if acct.brand in brands else acct.brand }}</td>
+      <td>{{ platforms[acct.platform].label if acct.platform in platforms else acct.platform }}</td>
+      <td class="faint">{{ acct.handle or '—' }}</td>
+      <td><span class="pill muted">{{ acct.mode.value }}</span></td>
+      <td>
+        {% if ready %}<span class="pill live">{{ detail }}</span>
+        {% else %}<span class="pill bad" title="{{ detail }}">not ready</span>{% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<div class="note warn">
+  <p>No accounts are enabled yet, so nothing will publish. That is the safe
+     default.</p>
+  <p>Add credentials on <a href="/accounts">Accounts</a>, then set a cadence on
+     <a href="/schedules">Schedules</a>. Leave the global <strong>DRY RUN</strong>
+     switch on until you have seen a few generated posts you are happy with.</p>
+</div>
+{% endif %}
+
+<div class="grid g2">
+  <div>
+    <h2>Coming up</h2>
+    <div class="card tight">
+      {% if upcoming %}
+      <table>
+        <thead><tr><th>When</th><th>Where</th><th>Copy</th><th>Score</th><th></th></tr></thead>
+        <tbody>
+        {% for p in upcoming %}
+          <tr>
+            <td class="faint mono">{{ p.scheduled_for.strftime('%d %b %H:%M') if p.scheduled_for else '—' }}</td>
+            <td><span class="faint">{{ p.brand }}</span><br>{{ p.platform }}</td>
+            <td class="truncate">{{ p.body[:130] }}</td>
+            <td>
+              <span class="score {{ 'hi' if p.quality_score >= 7.5 else ('mid' if p.quality_score >= 6 else 'lo') }}">
+                {{ '%.1f'|format(p.quality_score or 0) }}
+              </span>
+            </td>
+            <td><a class="btn sm" href="/post/{{ p.id }}">open</a></td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+        <p class="faint">Nothing queued. Enable a schedule, or
+           <a href="/compose">compose one now</a>.</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <div>
+    <h2>Radar — highest relevance</h2>
+    <div class="card tight">
+      {% if hot %}
+      <table>
+        <thead><tr><th>Rel</th><th>Where</th><th>Thread</th></tr></thead>
+        <tbody>
+        {% for t in hot %}
+          <tr>
+            <td><span class="score {{ 'hi' if t.relevance >= 0.75 else ('mid' if t.relevance >= 0.5 else 'lo') }}">{{ '%.2f'|format(t.relevance) }}</span></td>
+            <td class="faint">{{ t.where }}</td>
+            <td class="truncate"><a href="/radar">{{ t.title[:110] }}</a></td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+        <p class="faint">No threads yet. Add targets on <a href="/radar">Radar</a>.</p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+{% if recent %}
+<h2>Recently published</h2>
+<div class="card tight">
+<table>
+  <thead><tr><th>When</th><th>Where</th><th>Copy</th><th>Link</th></tr></thead>
+  <tbody>
+  {% for p in recent %}
+    <tr>
+      <td class="faint mono">{{ p.published_at.strftime('%d %b %H:%M') if p.published_at else '' }}</td>
+      <td class="faint">{{ p.brand }} / {{ p.platform }}</td>
+      <td class="truncate">{{ p.body[:130] }}</td>
+      <td>{% if p.remote_url %}<a href="{{ p.remote_url }}" target="_blank" rel="noopener">view</a>{% else %}<span class="faint">—</span>{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+
+<h2>Recent jobs</h2>
+<div class="card tight">
+  <table>
+    <thead><tr><th>Job</th><th>State</th><th>Detail</th></tr></thead>
+    <tbody id="jobrows">
+    {% for j in jobs|reverse %}
+      <tr>
+        <td class="mono">{{ j.name }}</td>
+        <td><span class="pill {{ 'live' if j.state=='done' else ('bad' if j.state=='failed' else 'info') }}">{{ j.state }}</span></td>
+        <td class="faint">{{ j.detail }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="3" class="faint">Nothing has run yet.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

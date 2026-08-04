@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}Brands — AdForge{% endblock %}
+{% block body %}
+<h1>Brand profiles</h1>
+<p class="sub">Voice, approved claims, pillars and visual direction. This is what
+   the writer is grounded on.</p>
+
+<div class="note">
+  <p>The <code class="mono">proof_points</code> list is the only set of claims the
+     writer may make. Anything not traceable to it is treated as invention.
+     <code class="mono">hard_rules</code> are additionally enforced in code — for
+     Vallorix that is what stops the model ever claiming the product itself holds
+     SOC 2 or ISO 27001.</p>
+  <p class="faint">Saving validates the YAML and reloads it. If the file parses but
+     does not load cleanly, the previous version is restored automatically.
+     Watch for unquoted colons inside list items — <code class="mono">- Docs: x.co</code>
+     silently becomes a dict and is rejected.</p>
+</div>
+
+{% for key, content in raw.items() %}
+<details class="acc" {{ 'open' if loop.first }}>
+  <summary>
+    <strong>{{ brands[key].name if key in brands else key }}</strong>
+    <span class="faint">{{ key }}.yaml</span>
+    {% if key in brands %}
+      <span class="right faint">
+        {{ brands[key].proof_points|length }} claims ·
+        {{ brands[key].pillars|length }} pillars ·
+        {{ brands[key].hard_rules|length }} hard rules
+      </span>
+    {% endif %}
+  </summary>
+  <div>
+    {% if key in brands %}
+    <div class="grid g2" style="margin-bottom:14px">
+      <div>
+        <h3>Approved claims</h3>
+        <ul class="faint" style="margin:0; padding-left:18px">
+          {% for p in brands[key].proof_points %}<li>{{ p }}</li>{% endfor %}
+        </ul>
+      </div>
+      <div>
+        <h3>Pillars</h3>
+        {% for pil in brands[key].pillars %}
+          <div style="margin-bottom:6px">
+            <span class="tag">w{{ pil.weight }}</span> <strong>{{ pil.label }}</strong>
+            <div class="faint">{{ pil.description[:150] }}</div>
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% if brands[key].hard_rules %}
+      <div class="note bad">
+        <p><strong>Hard rules (enforced in code):</strong></p>
+        <ul style="margin:6px 0 0; padding-left:18px">
+          {% for r in brands[key].hard_rules %}<li class="faint">{{ r }}</li>{% endfor %}
+        </ul>
+      </div>
+    {% endif %}
+    {% endif %}
+
+    <form method="post" action="/brands/{{ key }}">
+      <label>{{ key }}.yaml</label>
+      <textarea class="code" name="content">{{ content }}</textarea>
+      <div style="margin-top:10px">
+        <button class="primary" type="submit">Save &amp; reload</button>
+        <span class="faint" style="margin-left:10px">
+          A <code class="mono">.yaml.bak</code> copy is kept beside it.
+        </span>
+      </div>
+    </form>
+  </div>
+</details>
+{% endfor %}
+{% endblock %}

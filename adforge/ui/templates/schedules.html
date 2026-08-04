@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+{% block title %}Schedules — AdForge{% endblock %}
+{% block body %}
+<div class="row">
+  <div>
+    <h1>Posting schedules</h1>
+    <p class="sub">How often, which days, what times — per brand, per platform.</p>
+  </div>
+  <div class="right">
+    <form method="post" action="/schedules/plan-now">
+      <button class="primary">Generate the next 26h now</button>
+    </form>
+  </div>
+</div>
+
+<div class="note">
+  <p>Content is generated <strong>ahead</strong> of its slot, not at posting time —
+     a 70B model plus a video render takes minutes, and doing that work at the
+     moment of publication would make every post late.</p>
+  <p>Each post then waits <strong>{{ settings.review_window_minutes }} minutes</strong>
+     in review before an AUTO account publishes it. Set that to 0 on
+     <a href="/settings">Settings</a> for fully hands-off operation. A post that
+     failed the quality bar always waits for a human regardless.</p>
+  <p class="faint">Hard ceiling: {{ settings.daily_post_cap }} posts per brand per
+     platform per day, whatever the schedule says.</p>
+</div>
+
+{% for sched in schedules %}
+{% set acct = accounts.get((sched.brand, sched.platform)) %}
+{% set ps = platforms[sched.platform] %}
+<details class="acc" {{ 'open' if sched.enabled }}>
+  <summary>
+    <strong>{{ brands[sched.brand].name if sched.brand in brands else sched.brand }}</strong>
+    <span class="faint">→</span> {{ ps.label }}
+    {% if sched.enabled %}
+      <span class="pill live">{{ sched.posts_per_day }}/day</span>
+    {% else %}
+      <span class="pill muted">off</span>
+    {% endif %}
+    {% if acct and not acct.enabled %}
+      <span class="pill warn" title="The schedule will generate posts but nothing can publish until the account is enabled.">account disabled</span>
+    {% endif %}
+    <span class="right faint">{{ sched.times or (sched.window_start ~ '–' ~ sched.window_end) }}</span>
+  </summary>
+  <div>
+    <form method="post" action="/schedules/{{ sched.id }}">
+      <div class="grid g3">
+        <div>
+          <label class="inline">
+            <input type="checkbox" name="enabled" {{ 'checked' if sched.enabled }}>
+            Schedule enabled
+          </label>
+          <label class="inline">
+            <input type="checkbox" name="attach_media" {{ 'checked' if sched.attach_media }}>
+            Generate media
+          </label>
+          {% if ps.key in ('tiktok', 'youtube') %}
+            <div class="hint">On {{ ps.label }} the media <em>is</em> the post — a
+              full video is rendered per slot. Expect several minutes each.</div>
+          {% elif not ps.supports_image %}
+            <div class="hint">{{ ps.label }} does not take a still image.</div>
+          {% endif %}
+        </div>
+
+        <div class="field">
+          <label>Posts per day <span class="faint">(max {{ settings.daily_post_cap }})</span></label>
+          <input type="number" name="posts_per_day" min="0"
+                 max="{{ settings.daily_post_cap }}" value="{{ sched.posts_per_day }}">
+        </div>
+
+        <div class="field">
+          <label>Jitter ± minutes</label>
+          <input type="number" name="jitter_minutes" min="0" max="120"
+                 value="{{ sched.jitter_minutes }}">
+          <div class="hint">Stops every post firing on the same exact minute daily,
+             which reads as robotic to humans as much as to platforms.</div>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Days of the week</label>
+        {% for i, day in [(0,'Mon'),(1,'Tue'),(2,'Wed'),(3,'Thu'),(4,'Fri'),(5,'Sat'),(6,'Sun')] %}
+          <label class="inline">
+            <input type="checkbox" name="days_of_week" value="{{ i }}"
+                   {{ 'checked' if i in sched.day_list() }}> {{ day }}
+          </label>
+        {% endfor %}
+      </div>
+
+      <div class="grid g3">
+        <div class="field">
+          <label>Pinned times <span class="faint">(comma separated, 24h local)</span></label>
+          <input type="text" name="times" value="{{ sched.times }}"
+                 placeholder="09:15, 13:40, 17:05">
+          <div class="hint">Any slots beyond these are spread evenly across the
+            window below.</div>
+        </div>
+        <div class="field">
+          <label>Window start</label>
+          <input type="time" name="window_start" value="{{ sched.window_start }}">
+        </div>
+        <div class="field">
+          <label>Window end</label>
+          <input type="time" name="window_end" value="{{ sched.window_end }}">
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Content pillars <span class="faint">(none selected = all, weighted)</span></label>
+        {% if sched.brand in brands %}
+          {% for pil in brands[sched.brand].pillars %}
+            <label class="inline">
+              <input type="checkbox" name="pillars" value="{{ pil.key }}"
+                     {{ 'checked' if pil.key in sched.pillar_list() }}>
+              {{ pil.label }} <span class="faint">(w{{ pil.weight }})</span>
+            </label>
+          {% endfor %}
+        {% endif %}
+      </div>
+
+      <button class="primary" type="submit">Save schedule</button>
+      {% if preview.get(sched.id) %}
+        <span class="faint" style="margin-left:12px">Next slots:
+          {% for slot in preview[sched.id] %}
+            <span class="tag">{{ slot.astimezone(tz).strftime('%a %H:%M') }}</span>
+          {% endfor %}
+        </span>
+      {% endif %}
+    </form>
+  </div>
+</details>
+{% endfor %}
+{% endblock %}

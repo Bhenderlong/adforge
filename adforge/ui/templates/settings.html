@@ -1,0 +1,245 @@
+{% extends "base.html" %}
+{% block title %}Settings — AdForge{% endblock %}
+{% block body %}
+<h1>Settings</h1>
+<p class="sub">Written to <code class="mono">{{ env_path }}</code>. A restart applies them.</p>
+
+{% if request.query_params.get('saved') %}
+<div class="note"><p><strong>Saved.</strong> Restart AdForge for these to take
+   effect — the running process is not hot-patched, and pretending otherwise
+   would be worse than saying so.</p></div>
+{% endif %}
+
+<form method="post" action="/settings">
+
+<h2>Safety</h2>
+<div class="card">
+  <input type="hidden" name="bool_dry_run_present" value="1">
+  <label class="inline">
+    <input type="checkbox" name="bool_dry_run" {{ 'checked' if settings.dry_run }}>
+    <strong>Global dry run</strong> — build every request, transmit nothing
+  </label>
+  <div class="hint">The master switch. While on, no account can publish
+     regardless of its own setting. Turn it off only once you have read a few
+     generated posts and are happy with them.</div>
+
+  <div class="grid g2" style="margin-top:14px">
+    <div class="field">
+      <label>Review window (minutes)</label>
+      <input type="number" name="set_review_window_minutes" min="0" max="10080"
+             value="{{ settings.review_window_minutes }}">
+      <div class="hint">How long an AUTO post waits before publishing. 0 = fully
+        hands-off. Posts that failed the quality bar always wait for a human
+        whatever this says.</div>
+    </div>
+    <div class="field">
+      <label>Daily post cap (per brand, per platform)</label>
+      <input type="number" name="set_daily_post_cap" min="1" max="50"
+             value="{{ settings.daily_post_cap }}">
+      <div class="hint">A hard ceiling that overrides any schedule.</div>
+    </div>
+  </div>
+</div>
+
+<h2>Inference</h2>
+<div class="card">
+  <div class="grid g2">
+    <div class="field">
+      <label>Backend</label>
+      <select name="set_llm_backend">
+        <option value="ollama" {{ 'selected' if settings.llm_backend == 'ollama' }}>Ollama</option>
+        <option value="vllm" {{ 'selected' if settings.llm_backend == 'vllm' }}>vLLM</option>
+      </select>
+      <div class="hint">Both speak the OpenAI dialect. Only Ollama can release
+        VRAM on demand, which is what lets the writer and ComfyUI share these
+        two cards — with vLLM you would want ComfyUI on another box.</div>
+    </div>
+    <div class="field">
+      <label>Timeout (seconds)</label>
+      <input type="number" name="set_llm_timeout" min="30" max="3600"
+             value="{{ settings.llm_timeout }}">
+    </div>
+  </div>
+
+  <div class="grid g3">
+    {% for name, label, current, hint in [
+        ('model_writer', 'Writer', settings.model_writer, 'Writes the copy. Biggest model that fits.'),
+        ('model_critic', 'Critic', settings.model_critic, 'Scores drafts and demands rewrites.'),
+        ('model_fast',   'Fast',   settings.model_fast,   'Radar scoring and image prompts.')] %}
+    <div class="field">
+      <label>{{ label }} model</label>
+      {% if models %}
+      <select name="set_{{ name }}">
+        {% for m in models %}
+          <option value="{{ m }}" {{ 'selected' if current == m }}>{{ m }}</option>
+        {% endfor %}
+      </select>
+      {% else %}
+      <input type="text" name="set_{{ name }}" value="{{ current }}">
+      {% endif %}
+      <div class="hint">{{ hint }}</div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <div class="field">
+    <label>Fallback models <span class="faint">(comma separated, tried in order on OOM)</span></label>
+    <input type="text" name="set_model_fallbacks" value="{{ settings.model_fallbacks }}">
+    <div class="hint">A 70B needs both cards. If something else has taken the
+      memory, these keep a scheduled run producing instead of failing.</div>
+  </div>
+
+  <div class="note warn">
+    <p><strong>Do not pick a reasoning model here</strong> (qwen3.x, glm-4.x,
+       deepseek-r1). They spend the token budget on a chain of thought and return
+       an empty answer, which shows up as blank posts. Instruct-tuned models only.</p>
+  </div>
+</div>
+
+<h2>Image &amp; video</h2>
+<div class="card">
+  <div class="grid g2">
+    <div class="field">
+      <label>ComfyUI URL</label>
+      <input type="text" name="set_comfy_url" value="{{ settings.comfy_url }}">
+    </div>
+    <div class="field">
+      <label>Checkpoint</label>
+      {% if checkpoints %}
+      <select name="set_comfy_checkpoint">
+        {% for c in checkpoints %}
+          <option value="{{ c }}" {{ 'selected' if settings.comfy_checkpoint == c }}>{{ c }}</option>
+        {% endfor %}
+      </select>
+      {% else %}
+      <input type="text" name="set_comfy_checkpoint" value="{{ settings.comfy_checkpoint }}">
+      {% endif %}
+      <div class="hint">This list excludes the adult-content and non-checkpoint
+        files that share the model directory.</div>
+    </div>
+  </div>
+
+  <input type="hidden" name="bool_enable_video_present" value="1">
+  <label class="inline">
+    <input type="checkbox" name="bool_enable_video" {{ 'checked' if settings.enable_video }}>
+    Generate video for TikTok and YouTube
+  </label>
+  <div class="hint">Each short is several image renders plus several Wan clips.
+    Budget minutes per video, not seconds.</div>
+
+  <div class="grid g2" style="margin-top:12px">
+    <div class="field">
+      <label>Wan high-noise expert</label>
+      {% if unets %}
+      <select name="set_wan_high_noise">
+        {% for u in unets %}<option value="{{ u }}" {{ 'selected' if settings.wan_high_noise == u }}>{{ u }}</option>{% endfor %}
+      </select>
+      {% else %}<input type="text" name="set_wan_high_noise" value="{{ settings.wan_high_noise }}">{% endif %}
+    </div>
+    <div class="field">
+      <label>Wan low-noise expert</label>
+      {% if unets %}
+      <select name="set_wan_low_noise">
+        {% for u in unets %}<option value="{{ u }}" {{ 'selected' if settings.wan_low_noise == u }}>{{ u }}</option>{% endfor %}
+      </select>
+      {% else %}<input type="text" name="set_wan_low_noise" value="{{ settings.wan_low_noise }}">{% endif %}
+    </div>
+    <div class="field">
+      <label>Wan VAE</label>
+      {% if vaes %}
+      <select name="set_wan_vae">
+        {% for v in vaes %}<option value="{{ v }}" {{ 'selected' if settings.wan_vae == v }}>{{ v }}</option>{% endfor %}
+      </select>
+      {% else %}<input type="text" name="set_wan_vae" value="{{ settings.wan_vae }}">{% endif %}
+      <div class="hint"><strong>Must be the 2.1 VAE</strong> despite the 2.2 model
+        names. <code class="mono">wan2.2_vae</code> belongs to the TI2V-5B variant
+        and has a different latent channel count; pairing it with the 14B experts
+        fails with a 36-vs-64 channel error.</div>
+    </div>
+    <div class="field">
+      <label>Text encoder</label>
+      {% if clips %}
+      <select name="set_wan_text_encoder">
+        {% for c in clips %}<option value="{{ c }}" {{ 'selected' if settings.wan_text_encoder == c }}>{{ c }}</option>{% endfor %}
+      </select>
+      {% else %}<input type="text" name="set_wan_text_encoder" value="{{ settings.wan_text_encoder }}">{% endif %}
+    </div>
+  </div>
+
+  <div class="grid g4">
+    <div class="field">
+      <label>Frames per clip</label>
+      <input type="number" name="set_wan_frames" min="17" max="121" step="4" value="{{ settings.wan_frames }}">
+      <div class="hint">Wan wants 4n+1.</div>
+    </div>
+    <div class="field">
+      <label>Clip fps</label>
+      <input type="number" name="set_wan_fps" min="8" max="30" value="{{ settings.wan_fps }}">
+    </div>
+    <div class="field">
+      <label>Render width</label>
+      <input type="number" name="set_wan_width" min="256" max="1280" step="16" value="{{ settings.wan_width }}">
+    </div>
+    <div class="field">
+      <label>Render height</label>
+      <input type="number" name="set_wan_height" min="256" max="1280" step="16" value="{{ settings.wan_height }}">
+      <div class="hint">Upscaled to the platform size afterwards.</div>
+    </div>
+  </div>
+</div>
+
+<h2>Radar</h2>
+<div class="card">
+  <input type="hidden" name="bool_radar_enabled_present" value="1">
+  <label class="inline">
+    <input type="checkbox" name="bool_radar_enabled" {{ 'checked' if settings.radar_enabled }}>
+    Scan Reddit and Discord for relevant threads
+  </label>
+  <div class="grid g2" style="margin-top:12px">
+    <div class="field">
+      <label>Scan interval (minutes)</label>
+      <input type="number" name="set_radar_interval_minutes" min="5" max="1440"
+             value="{{ settings.radar_interval_minutes }}">
+    </div>
+    <div class="field">
+      <label>Maximum replies per day</label>
+      <input type="number" name="set_radar_max_replies_per_day" min="1" max="50"
+             value="{{ settings.radar_max_replies_per_day }}">
+      <div class="hint">Volume is what turns disclosed participation into spam.
+        Keep this low.</div>
+    </div>
+  </div>
+  <div class="note">
+    <p>Reply approval is not configurable. Every radar reply requires a human
+       click and carries a disclosure — see <code class="mono">radar/policy.py</code>
+       for why.</p>
+  </div>
+</div>
+
+<h2>General</h2>
+<div class="card">
+  <div class="grid g2">
+    <div class="field">
+      <label>Timezone</label>
+      <input type="text" name="set_timezone" value="{{ settings.timezone }}">
+      <div class="hint">IANA name. Schedule times are interpreted in this zone.</div>
+    </div>
+    <div class="field">
+      <label>Listen port</label>
+      <input type="number" name="set_port" min="1024" max="65535" value="{{ settings.port }}">
+    </div>
+  </div>
+  <div class="field">
+    <label>Bind host</label>
+    <input type="text" name="set_host" value="{{ settings.host }}">
+    <div class="hint">Leave on <code class="mono">127.0.0.1</code> unless you put
+      an authenticating reverse proxy in front. This UI has no login and holds
+      every platform credential you enter.</div>
+  </div>
+</div>
+
+<div style="margin:18px 0 40px">
+  <button class="primary" type="submit">Save settings</button>
+</div>
+</form>
+{% endblock %}
