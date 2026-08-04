@@ -141,9 +141,14 @@ def main() -> int:
             sched.shutdown()
         return 0
 
+    import os
+
     import uvicorn
 
-    uvicorn.run("adforge.ui.app:app", host=settings.host, port=settings.port,
+    # PORT wins over the configured value so a supervisor or dev harness can
+    # place the server wherever it needs to without editing settings.
+    port = int(os.environ.get("PORT") or settings.port)
+    uvicorn.run("adforge.ui.app:app", host=settings.host, port=port,
                 log_level="warning")
     return 0
 

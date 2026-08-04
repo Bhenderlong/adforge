@@ -1,11 +1,6 @@
 {
   "version": "0.0.1",
   "configurations": [
-    {
-      "name": "adforge",
-      "runtimeExecutable": "./venv/bin/python",
-      "runtimeArgs": ["run.py"],
-      "port": 8770
-    }
+    { "name": "adforge", "runtimeExecutable": "./venv/bin/python", "runtimeArgs": ["run.py"], "port": 8770 }
   ]
 }
