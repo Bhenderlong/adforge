@@ -389,3 +389,106 @@ def test_no_shadowed_routes():
             ):
                 shadowed.append(f"{path} is unreachable behind {ppath}")
     assert not shadowed, "; ".join(shadowed)
+
+
+# --- UI wiring --------------------------------------------------------------
+# Two bugs shipped that only clicking could find: a form posting to a route
+# shadowed by a parameterised sibling, and a raw validation blob shown as the
+# response. Component tests cannot catch "the button posts somewhere that does
+# not resolve", so this walks the templates.
+
+def _app_routes():
+    from adforge.ui.app import app
+
+    return [
+        (r.path, set(getattr(r, "methods", set())))
+        for r in app.routes
+        if hasattr(r, "path") and getattr(r, "methods", None)
+    ]
+
+
+def _resolves(url: str, method: str) -> str | None:
+    import re
+
+    for path, methods in _app_routes():
+        if method in methods and re.fullmatch(
+            re.sub(r"\{[^}]+\}", "[^/]+", path), url
+        ):
+            return path
+    return None
+
+
+def _concretise(url: str) -> str:
+    """Turn a template/JS URL expression into a concrete path."""
+    import re
+
+    url = url.strip().strip("'\"")
+    url = re.sub(r"\{\{[^}]+\}\}", "1", url)            # {{ post.id }}
+    url = re.sub(r"['\"]\s*\+\s*[\w.]+\s*\+\s*['\"]", "1", url)  # 'a/' + id + '/b'
+    url = re.sub(r"['\"]\s*\+\s*[\w.]+", "1", url)      # 'a/' + id
+    return url.strip().strip("'\"")
+
+
+def test_every_form_posts_to_a_real_route():
+    """Also catches a literal segment silently absorbed by a {param} route.
+
+    Checking "does it resolve" alone is vacuous: /schedules/does-not-exist
+    resolves fine against /schedules/{sched_id}, because the placeholder eats
+    any string. That is exactly the bug that shipped - plan-now was parsed as
+    an id. So a form whose action contains a literal word where the matched
+    route has a parameter is treated as broken unless a literal route exists
+    for it.
+    """
+    import pathlib
+    import re
+
+    broken = []
+    for tpl in sorted(pathlib.Path("adforge/ui/templates").glob("*.html")):
+        for m in re.finditer(r"<form\b([^>]*)>", tpl.read_text()):
+            attrs = m.group(1)
+            action = re.search(r'action="([^"]*)"', attrs)
+            if not action:
+                continue
+            method = (re.search(r'method="([^"]*)"', attrs) or [None, "get"])[1].upper()
+            raw = action.group(1)
+            url = _concretise(raw)
+            hit = _resolves(url, method)
+            if not hit:
+                broken.append(f"{tpl.name}: {method} {url} resolves to nothing")
+                continue
+
+            # Compare segment by segment. A segment that is a literal word in
+            # the template but a {param} in the matched route means the route
+            # is swallowing it.
+            raw_segs, hit_segs = raw.strip("/").split("/"), hit.strip("/").split("/")
+            if len(raw_segs) != len(hit_segs):
+                continue
+            for rseg, hseg in zip(raw_segs, hit_segs):
+                templated = "{{" in rseg or "{%" in rseg
+                if hseg.startswith("{") and not templated and not rseg.isdigit():
+                    broken.append(
+                        f"{tpl.name}: {method} {raw} - literal {rseg!r} is being "
+                        f"captured by {hit}"
+                    )
+    assert not broken, "; ".join(broken)
+
+
+def test_every_fetch_call_targets_a_real_route():
+    import pathlib
+    import re
+
+    broken = []
+    for tpl in sorted(pathlib.Path("adforge/ui/templates").glob("*.html")):
+        src = tpl.read_text()
+        for m in re.finditer(r"fetch\(\s*([^,)]+)", src):
+            method = (
+                "POST"
+                if "method: 'POST'" in src[m.start(): m.start() + 220]
+                else "GET"
+            )
+            url = _concretise(m.group(1))
+            if not url.startswith("/"):
+                continue  # a computed URL we cannot resolve statically
+            if not _resolves(url, method):
+                broken.append(f"{tpl.name}: {method} {url}")
+    assert not broken, "fetch calls to nowhere: " + "; ".join(broken)
