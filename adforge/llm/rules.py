@@ -155,6 +155,10 @@ FABRICATED_METRIC = [
     r"speedup|performance)\b",
     r"(?i)\b(?:up to|as much as|over)\s+\d+(?:\.\d+)?\s*(?:%|percent|x\b)",
     r"(?i)\bsaves?\s+(?:you\s+)?\d+(?:\.\d+)?\s*(?:%|percent|hours|days|weeks)\b",
+    # "7-figure dataset updates" - a real generation. N-figure describes money,
+    # so applied to anything else it is meaningless, and applied to money it is
+    # an unverifiable magnitude claim. Either way it says nothing true.
+    r"(?i)\b(?:\d|two|three|four|five|six|seven|eight|nine|ten)[- ]figure\b",
     # Money. "batching 10 requests saves $0.06 per hour on an RTX 3080" is a
     # benchmark nobody ran, and a costing claim invites someone to hold you to
     # it. Prices traceable to proof_points still pass via _cited_number.
@@ -393,6 +397,18 @@ def check(text: str, brand: Brand, ps: PlatformSpec) -> list[Violation]:
             Violation("BLOCK", "misspelt_hashtag",
                       f"{bad} - a mistyped tag is followed by nobody")
         )
+
+    # Backticks and asterisks are literal characters on most platforms. A real
+    # Instagram caption shipped "`git add` your CSVs", which publishes with the
+    # backticks visible.
+    if not ps.renders_markup:
+        if re.search(r"`[^`\n]+`", stripped):
+            v.append(Violation("BLOCK", "literal_markup",
+                               f"backtick code formatting does not render on "
+                               f"{ps.label} - the backticks publish as text"))
+        if re.search(r"\*\*[^*\n]+\*\*|(?<!\*)\*[^*\n]{2,}\*(?!\*)", stripped):
+            v.append(Violation("BLOCK", "literal_markup",
+                               f"markdown emphasis does not render on {ps.label}"))
 
     if _emoji_count(stripped) > 4:
         v.append(Violation("WARN", "emoji_spam", "more than 4 emoji"))

@@ -33,6 +33,9 @@ class PlatformSpec:
     #   "demoted"     - allowed but costs reach (LinkedIn); prefer first comment
     #   "unclickable" - renders as plain text (Instagram, TikTok); never include
     link_policy: str = "ok"
+    # Whether markdown/backtick code formatting renders. Where it does not,
+    # backticks and asterisks are published as literal characters.
+    renders_markup: bool = False
     notes: str = ""
     # Tone shaping passed to the copywriter.
     register: str = ""
@@ -132,6 +135,7 @@ SPECS: dict[str, PlatformSpec] = {
         video_size=(1280, 720),
         video_seconds=60,
         hashtags=(0, 0),
+        renders_markup=True,  # markdown renders here
         notes="Every target subreddit has its own self-promotion rule; the "
         "adapter refuses to post to a sub not explicitly allowlisted.",
         register="Write like a practitioner posting to peers. Marketing "
@@ -147,6 +151,7 @@ SPECS: dict[str, PlatformSpec] = {
         video_size=(1280, 720),
         video_seconds=60,
         hashtags=(0, 0),
+        renders_markup=True,  # markdown renders here
         register="Peer-to-peer, low ceremony. Announcements are short and "
         "factual; no press-release voice.",
     ),
@@ -156,6 +161,7 @@ SPECS: dict[str, PlatformSpec] = {
         max_chars=3000,
         image_size=(1200, 675),
         hashtags=(0, 0),
+        renders_markup=True,  # markdown renders here
         register="Internal-update voice. Direct, skimmable, no marketing gloss.",
     ),
 }

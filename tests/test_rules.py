@@ -323,3 +323,44 @@ def test_anecdotes_without_a_pronoun_are_blocked(text, inferix):
 def test_ordinary_technical_prose_is_not_mistaken_for_an_anecdote(text, inferix):
     """A gate that suppresses correct output is its own failure."""
     assert codes(text, inferix, "x") == []
+
+
+# --- found generating for Instagram -----------------------------------------
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "7-figure dataset updates used to mean hours reconciling diffs.",
+        "Six-figure savings on compute every month for teams that batch.",
+        "Three-figure hourly costs are what you avoid by sizing correctly.",
+    ],
+)
+def test_n_figure_magnitude_claims_are_blocked(text, inferix):
+    """N-figure describes money; applied to anything else it is meaningless.
+
+    A real Instagram caption opened "7-figure dataset updates used to mean
+    hours reconciling diffs" - which parses as nothing at all.
+    """
+    assert "fabricated_metric" in codes(text, inferix, "instagram")
+
+
+@pytest.mark.parametrize("platform", ["instagram", "x", "linkedin", "facebook"])
+def test_backticks_are_blocked_where_markdown_does_not_render(platform, inferix):
+    """A caption shipped "`git add` your CSVs" - backticks publish as text."""
+    text = ("Version datasets like code: run `git add` on your CSVs and push "
+            "them straight to the registry.")
+    assert "literal_markup" in codes(text, inferix, platform)
+
+
+@pytest.mark.parametrize("platform", ["reddit", "discord", "slack"])
+def test_markdown_is_allowed_where_it_renders(platform, inferix):
+    text = ("Version datasets like code: run `git add` on your CSVs and push "
+            "them straight to the registry, keeping artifacts portable.")
+    assert codes(text, inferix, platform) == []
+
+
+def test_markdown_emphasis_is_blocked_where_it_does_not_render(inferix):
+    assert "literal_markup" in codes(
+        "Use **continuous batching** to raise throughput on one card.",
+        inferix, "x",
+    )
