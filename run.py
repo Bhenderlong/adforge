@@ -112,6 +112,90 @@ def check() -> int:
     return 1 if problems else 0
 
 
+MUTATIONS = [
+    # (label, file, find, replace) - each disables one guard. The suite must
+    # fail for every one of them, otherwise that guard is untested and a later
+    # refactor can remove it silently. Written after finding a test that passed
+    # on the exact bug it was meant to catch.
+    ("dry run defaults to live with no account", "adforge/platforms/registry.py",
+     "    if account is None:\n        return True",
+     "    if account is None:\n        return False"),
+    ("anti-astroturf policy disabled", "adforge/radar/policy.py",
+     "    for pat, code in SHILL_PATTERNS:", "    for pat, code in []:"),
+    ("reddit allowlist disabled", "adforge/platforms/community.py",
+     '        if not options.get("allowed") or granted.lower() != sub.lower():',
+     "        if False:"),
+    ("vallorix legal rules disabled", "adforge/llm/rules.py",
+     '    if brand.key == "vallorix":', "    if False:"),
+    ("republish guard removed", "adforge/platforms/registry.py",
+     "    if post.remote_id and not dry:", "    if False:"),
+    ("score uses the average not the worst", "adforge/llm/copywriter.py",
+     "        return min(vals)", "        return sum(vals)/len(vals)"),
+    ("fabricated metrics allowed", "adforge/llm/rules.py",
+     "    for pat in FABRICATED_METRIC:", "    for pat in []:"),
+    ("fabricated anecdotes allowed", "adforge/llm/rules.py",
+     "    for pat, code in FABRICATED_ANECDOTE:", "    for pat, code in []:"),
+]
+
+
+def selftest() -> int:
+    """Preflight, the test suite, then check the suite can actually fail.
+
+    A green suite proves nothing on its own - one of these tests originally
+    passed on the exact routing bug it was written to catch. The mutation pass
+    breaks each safety guard in turn and requires the suite to notice.
+    """
+    import pathlib
+    import subprocess
+
+    print("=" * 62)
+    print("1. environment")
+    print("=" * 62)
+    env = check()
+
+    print("\n" + "=" * 62)
+    print("2. test suite")
+    print("=" * 62)
+    r = subprocess.run([sys.executable, "-m", "pytest", "tests/", "-q"],
+                       capture_output=True, text=True)
+    print(r.stdout.strip().splitlines()[-1] if r.stdout else "no output")
+    if r.returncode:
+        print("\nTests are failing; fix those before trusting anything below.")
+        return 1
+
+    print("\n" + "=" * 62)
+    print("3. mutation spot-checks - can the suite actually fail?")
+    print("=" * 62)
+    survived = []
+    for label, path, find, repl in MUTATIONS:
+        f = pathlib.Path(path)
+        orig = f.read_text()
+        if find not in orig:
+            print(f"  SKIP     {label} (anchor moved - update MUTATIONS)")
+            survived.append(label + " [anchor moved]")
+            continue
+        f.write_text(orig.replace(find, repl, 1))
+        try:
+            m = subprocess.run([sys.executable, "-m", "pytest", "tests/", "-q"],
+                               capture_output=True, text=True)
+        finally:
+            f.write_text(orig)  # always restore, even on ctrl-c
+        if m.returncode:
+            print(f"  caught   {label}")
+        else:
+            print(f"  SURVIVED {label}  <- that guard is untested")
+            survived.append(label)
+
+    print("\n" + "=" * 62)
+    if survived:
+        print(f"{len(survived)} guard(s) not covered by any test:")
+        for s in survived:
+            print(f"  - {s}")
+        return 1
+    print("environment ok, tests pass, and every safety guard is covered.")
+    return 0 if not env else 1
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="AdForge")
     ap.add_argument("--check", action="store_true", help="preflight and exit")
@@ -122,6 +206,8 @@ def main() -> int:
     ap.add_argument("--client-secret", default="", help="OAuth client secret for --auth")
     ap.add_argument("--secrets-file", default="",
                     help="path to the client_secret JSON downloaded from Google")
+    ap.add_argument("--selftest", action="store_true",
+                    help="preflight + test suite + mutation spot-checks")
     ap.add_argument("--worker", action="store_true", help="scheduler only, no UI")
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args()
@@ -130,6 +216,9 @@ def main() -> int:
 
     if args.check:
         return check()
+
+    if args.selftest:
+        return selftest()
 
     if args.auth:
         from adforge.platforms.oauth_helper import (SETUP_STEPS, print_result,

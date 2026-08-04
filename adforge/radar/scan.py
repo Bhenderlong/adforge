@@ -362,9 +362,15 @@ def scan_discord(session, target: RadarTarget, creds: dict) -> int:
     return found
 
 
+# Brand/source pairs already reported as unconfigured, so the warning is
+# logged once rather than on every 30-minute pass.
+_WARNED_MISSING: set = set()
+
+
 def scan_all() -> int:
     """Scan every enabled target. Returns total new threads found."""
     total = 0
+    _WARNED_MISSING.clear()
     with session_scope() as session:
         targets = session.query(RadarTarget).filter(RadarTarget.enabled.is_(True)).all()
         for target in targets:
@@ -377,6 +383,28 @@ def scan_all() -> int:
             if account is None:
                 log.info("no %s account for %s, skipping radar target %s",
                          target.source, target.brand, target.target)
+                continue
+
+            # Check the credentials exist BEFORE scanning. Without this the
+            # scan raised KeyError('client_id') or "Illegal header value
+            # b'Bot '" on every pass - once per target, every 30 minutes -
+            # which says nothing about the actual problem and buries real
+            # errors in noise. An unconfigured target is a normal state while
+            # you are still setting up, not an error.
+            creds = account.creds()
+            need = {"reddit": ("client_id", "client_secret", "username", "password"),
+                    "discord": ("bot_token",)}.get(target.source, ())
+            missing = [k for k in need if not str(creds.get(k, "")).strip()]
+            if missing:
+                key = (target.brand, target.source)
+                if key not in _WARNED_MISSING:
+                    _WARNED_MISSING.add(key)
+                    log.warning(
+                        "radar: %s/%s has no credentials yet (%s) - skipping its "
+                        "targets. Add them on the Accounts page; this is logged "
+                        "once per run.",
+                        target.brand, target.source, ", ".join(missing),
+                    )
                 continue
             try:
                 if target.source == "reddit":

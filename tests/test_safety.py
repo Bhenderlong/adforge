@@ -217,3 +217,30 @@ def test_reddit_refuses_when_no_subreddit_is_named():
     ):
         problems = ADAPTERS["reddit"].validate(creds, opts)
         assert any("subreddit" in p for p in problems), f"accepted {opts!r}"
+
+
+def test_radar_skips_targets_whose_account_has_no_credentials():
+    """An unconfigured target is a normal setup state, not an error.
+
+    It previously raised KeyError('client_id') and "Illegal header value
+    b'Bot '" once per target every 30 minutes, which named nothing actionable
+    and buried real errors.
+    """
+    import tempfile
+    import importlib
+    from adforge.config import settings
+
+    settings.db_url = f"sqlite:///{tempfile.mkdtemp()}/t.db"
+    import adforge.db as db
+    importlib.reload(db)
+    db.init_db()
+    import adforge.radar.scan as scan
+    importlib.reload(scan)
+
+    with db.session_scope() as s:
+        s.add(db.Account(brand="inferix", platform="reddit", enabled=True,
+                         credentials="{}", options="{}"))
+        s.add(db.RadarTarget(brand="inferix", source="reddit", target="all",
+                             keywords="gpu", enabled=True))
+    # Must return cleanly rather than raising.
+    assert scan.scan_all() == 0
