@@ -846,12 +846,30 @@ async def account_save(request: Request, account_id: int):
         if not acct:
             raise HTTPException(404, "no such account")
 
+        was_enabled = bool(acct.enabled)
         acct.handle = str(form.get("handle", ""))
         acct.enabled = bool(form.get("enabled"))
         acct.mode = PostMode(str(form.get("mode", "AUTO")))
         # Tri-state: "" inherits the global dry-run switch.
         dr = str(form.get("dry_run", ""))
         acct.dry_run = None if dr == "" else (dr == "1")
+
+        # Enabling an account must never go live by INHERITANCE.
+        #
+        # With the global switch off, "inherit" resolves to live - so ticking
+        # one checkbox on a form about handles and credentials would start
+        # publishing, with no step that was about publishing. Going live should
+        # take an act that says so. The account is pinned to dry run instead,
+        # and the user can then choose LIVE explicitly from the dropdown, which
+        # is a decision rather than a side effect.
+        if acct.enabled and not was_enabled and acct.dry_run is None \
+                and not settings.dry_run:
+            acct.dry_run = True
+            log.warning(
+                "%s/%s enabled while global dry run is off - pinned to dry run; "
+                "set Transmission to LIVE explicitly to publish",
+                acct.brand, acct.platform,
+            )
 
         # Credential fields arrive as cred_<name>. An empty submission keeps
         # the stored value, so the UI can show masked placeholders without

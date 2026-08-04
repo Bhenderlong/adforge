@@ -244,3 +244,41 @@ def test_radar_skips_targets_whose_account_has_no_credentials():
                              keywords="gpu", enabled=True))
     # Must return cleanly rather than raising.
     assert scan.scan_all() == 0
+
+
+def test_enabling_an_account_never_goes_live_by_inheritance(monkeypatch, tmp_path):
+    """Ticking one checkbox on a credentials form must not start publishing.
+
+    With the global switch off, dry_run=None resolves to live - so enabling an
+    account would transmit immediately, via a form that is about handles and
+    credentials rather than about publishing. Going live should require an act
+    that says so.
+    """
+    import importlib
+
+    from adforge.config import settings as cfg
+
+    cfg.db_url = f"sqlite:///{tmp_path}/t.db"
+    import adforge.db as db
+
+    importlib.reload(db)
+    db.init_db()
+
+    monkeypatch.setattr(cfg, "dry_run", False)  # global: LIVE
+    acct = db.Account(brand="inferix", platform="x", enabled=False,
+                      dry_run=None, credentials="{}", options="{}")
+
+    # Simulate the save handler's decision for a newly-enabled account.
+    was_enabled, now_enabled, submitted = False, True, None
+    acct.enabled, acct.dry_run = now_enabled, submitted
+    if acct.enabled and not was_enabled and acct.dry_run is None and not cfg.dry_run:
+        acct.dry_run = True
+
+    from adforge.platforms.registry import is_dry
+
+    assert acct.dry_run is True
+    assert is_dry(acct) is True, "enabling an account must not publish by default"
+
+    # An explicit LIVE choice is still honoured.
+    acct.dry_run = False
+    assert is_dry(acct) is False

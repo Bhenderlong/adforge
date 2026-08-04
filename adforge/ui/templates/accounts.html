@@ -52,7 +52,11 @@
           </select>
         </div>
         <div class="field">
-          <label>Transmission</label>
+          <label>Transmission
+            {% if not settings.dry_run and acct.dry_run is none and not acct.enabled %}
+              <span class="pill warn" title="Global dry run is off, so 'inherit' means live. Enabling this account will pin it to dry run; choose LIVE here to publish.">inherit = live</span>
+            {% endif %}
+          </label>
           <select name="dry_run">
             <option value="" {{ 'selected' if acct.dry_run is none }}>
               inherit global ({{ 'dry run' if settings.dry_run else 'live' }})
