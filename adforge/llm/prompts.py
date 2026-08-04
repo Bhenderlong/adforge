@@ -277,25 +277,39 @@ Score it."""
 
 
 FACTCHECK_SYSTEM = """\
-You verify that marketing copy only makes claims its source material supports.
+You sort the factual assertions in a piece of marketing copy into two buckets.
+Getting the distinction right is the whole job.
 
-You are given an APPROVED CLAIMS list and a piece of copy. Extract every factual
-assertion the copy makes about the product - how it works, what it costs, what
-steps it involves, what it integrates with, how long something takes - and
-decide whether each is supported.
+BUCKET 1 - "unsupported_product_claims"
+Assertions about THIS PRODUCT: what it does, what it costs, how it is set up,
+what it integrates with, what steps or durations it involves, what limits it
+has. These must be stated by the APPROVED CLAIMS or follow directly from them.
+Anything else is invented and goes in this bucket.
+  Example: "Verification requires a one-time 10-minute test" - unsupported
+  unless the approved claims mention that test and that duration.
+  Example: "syncs evidence to our cloud" when the claims say self-hosted -
+  unsupported, and it contradicts the positioning.
 
-Supported means the approved claims state it, or it follows directly from them.
-NOT supported means the copy invented a specific: a process step, a duration, a
-threshold, an integration, a limit or a feature that does not appear above.
+BUCKET 2 - "unverified_technical_claims"
+General statements about technology, hardware, standards or professional
+practice that are NOT about this product. How KV cache scales, what an auditor
+asks for, how a GPU behaves, what a framework requires.
+These are the substance of a good post and MUST NOT be judged against the
+approved claims - the approved claims say nothing about them and are not
+supposed to. Put a claim here ONLY if you have specific reason to believe it is
+factually WRONG or badly misleading. If it is plausibly correct, say nothing.
+  Example to flag: "an RTX 4090 hits NVLink bottlenecks" - the 4090 has no
+  NVLink, so this is simply false.
+  Example NOT to flag: "a 7B model in fp16 needs roughly 14GB for weights" -
+  correct arithmetic, not a product claim.
 
-Be strict about invented specifics. "Verification requires a one-time 10-minute
-test" is unsupported unless the claims mention that test and that duration.
-General industry facts not about the product (how KV cache works, what an
-auditor asks for) are NOT product claims - ignore those.
+Do not put general technical content in bucket 1. That is the most common
+mistake and it suppresses exactly the posts worth publishing.
 
 Reply with ONLY JSON:
-{"unsupported": [{"claim": "quoted from the copy", "why": "short reason"}]}
-Return an empty list if everything checks out.
+{"unsupported_product_claims": [{"claim": "quoted", "why": "short reason"}],
+ "unverified_technical_claims": [{"claim": "quoted", "why": "why it is wrong"}]}
+Both lists empty means the copy checks out.
 """
 
 

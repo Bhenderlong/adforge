@@ -102,7 +102,7 @@ def critique(text: str, brand: Brand, ps: PlatformSpec, pillar: Pillar) -> dict:
         return {"overall": 6.0, "verdict": "PASS", "problems": [], "fix": ""}
 
 
-def factcheck(text: str, brand: Brand) -> list[str]:
+def factcheck(text: str, brand: Brand) -> tuple[list[str], list[str]]:
     """Product claims in the copy that the brand profile does not support.
 
     The deterministic gate catches invented *numbers* ("25% faster"), but not
@@ -120,19 +120,27 @@ def factcheck(text: str, brand: Brand) -> list[str]:
         )
     except LLMError as e:
         log.warning("factcheck failed, allowing through: %s", e)
-        return []
+        return [], []
 
-    out = []
-    for item in data.get("unsupported", []) or []:
-        if isinstance(item, dict):
-            claim = str(item.get("claim", "")).strip()
-            why = str(item.get("why", "")).strip()
-            if claim:
-                out.append(f"unsupported claim {claim!r}: {why}" if why
-                           else f"unsupported claim {claim!r}")
-        elif str(item).strip():
-            out.append(f"unsupported claim: {str(item).strip()}")
-    return out
+    def _collect(key: str, label: str) -> list[str]:
+        out = []
+        for item in data.get(key) or []:
+            if isinstance(item, dict):
+                claim = str(item.get("claim", "")).strip()
+                why = str(item.get("why", "")).strip()
+                if claim:
+                    out.append(f"{label} {claim!r}: {why}" if why
+                               else f"{label} {claim!r}")
+            elif str(item).strip():
+                out.append(f"{label}: {str(item).strip()}")
+        return out
+
+    # Older prompt returned a single "unsupported" list; tolerate it so a
+    # half-updated deployment does not silently stop checking anything.
+    product = _collect("unsupported_product_claims", "unsupported product claim")
+    product += _collect("unsupported", "unsupported product claim")
+    technical = _collect("unverified_technical_claims", "likely incorrect")
+    return product, technical
 
 
 DIMENSIONS = ("hook", "specificity", "human", "value", "brand_fit", "coherence")
@@ -229,7 +237,7 @@ def _write_post(brand, ps, pillar, angle, recent, rng) -> Draft:
         # Claims the brand profile does not support. Treated as blocking: a
         # confident invented specific is worse than a bland post, because a
         # reader who acts on it finds the product does not work that way.
-        unsupported = factcheck(text, brand)
+        unsupported, dubious = factcheck(text, brand)
         if unsupported:
             problems = unsupported
             fix = (
@@ -250,12 +258,23 @@ def _write_post(brand, ps, pillar, angle, recent, rng) -> Draft:
         verdict = critique(text, brand, ps, pillar)
         score = _score_of(verdict)
         warns = [f"{w.code}: {w.detail}" for w in vs]
+
+        # A technical assertion the checker believes is wrong ("an RTX 4090
+        # hits NVLink bottlenecks" - it has no NVLink) is not blocked, because
+        # that judgement is itself a model's opinion and blocking on it would
+        # suppress correct posts. It does force a human look: getting the
+        # engineering wrong in front of engineers is the expensive mistake.
+        passed = score >= PASS_SCORE and verdict.get("verdict") != "REVISE"
+        if dubious:
+            passed = False
+            log.info("attempt %d flagged for review: %s", attempt, dubious[0][:120])
+
         cand = Draft(
             text=text,
             score=score,
-            passed=score >= PASS_SCORE and verdict.get("verdict") != "REVISE",
+            passed=passed,
             notes="; ".join(filter(None, [rules.summarize(vs), str(verdict.get("fix", ""))])),
-            problems=[str(p) for p in verdict.get("problems", [])] + warns,
+            problems=[str(p) for p in verdict.get("problems", [])] + dubious + warns,
             violations=vs,
             attempts=attempt,
             angle=angle,
