@@ -1002,6 +1002,29 @@ def _send_reply_job(draft_id: int) -> str:
         if thread is None:
             draft.error = "thread no longer exists"
             return draft.error
+
+        # Enforce the daily reply cap. settings.radar_max_replies_per_day was
+        # defined, documented as a safety rail and editable in the UI, but read
+        # nowhere - you could set it to 1 and send fifty. Volume is exactly
+        # what turns disclosed participation into spam, so a control that
+        # claims to bound it has to actually bound it.
+        since = utcnow() - dt.timedelta(hours=24)
+        sent_today = (
+            s.query(ReplyDraft.id)
+            .filter(ReplyDraft.brand == draft.brand,
+                    ReplyDraft.status == PostStatus.PUBLISHED,
+                    ReplyDraft.posted_at.isnot(None),
+                    ReplyDraft.posted_at >= since)
+            .count()
+        )
+        if sent_today >= settings.radar_max_replies_per_day:
+            draft.error = (
+                f"daily reply cap reached ({sent_today}/"
+                f"{settings.radar_max_replies_per_day} for {draft.brand} in the "
+                f"last 24h) - raise it on Settings or send this tomorrow"
+            )
+            log.info("reply %s blocked by daily cap", draft.id)
+            return draft.error
         account = (
             s.query(Account)
             .filter(Account.brand == draft.brand, Account.platform == thread.source)

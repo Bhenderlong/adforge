@@ -43,6 +43,9 @@ log = logging.getLogger("adforge.sched")
 
 LOOKAHEAD_HOURS = 26  # a bit over a day, so tomorrow's early slots exist tonight
 MAX_PUBLISH_ATTEMPTS = 3
+# A post whose slot passed more than this long ago is not published. See the
+# staleness bound in promote_and_publish for why.
+MAX_SLOT_AGE_HOURS = 12
 
 
 def _account_for(session, brand: str, platform: str) -> Account | None:
@@ -184,15 +187,71 @@ def promote_and_publish() -> tuple[int, int]:
         # is 1800s) and then do network I/O, and holding a write transaction
         # across that meant a crash mid-run rolled back PUBLISHED state for
         # posts that were already live, which then republished on the next tick.
-        due_ids = [
-            row[0]
-            for row in session.query(Post.id)
+        # STALENESS BOUND. Without it, a backlog that accumulated while the
+        # process was down - or while dry run was on, since a dry publish
+        # leaves the post APPROVED and past-due - all fires at once on the
+        # first tick after going live. That is a burst of old posts with no
+        # fresh review and no daily-cap check, since the cap is only consulted
+        # when planning.
+        stale_before = now - dt.timedelta(hours=MAX_SLOT_AGE_HOURS)
+
+        due_rows = (
+            session.query(Post.id, Post.brand, Post.platform, Post.scheduled_for)
             .filter(Post.status.in_([PostStatus.APPROVED, PostStatus.FAILED]))
             .filter(Post.scheduled_for.isnot(None), Post.scheduled_for <= now)
             .filter(Post.attempts < MAX_PUBLISH_ATTEMPTS)
             .order_by(Post.scheduled_for)
             .all()
-        ]
+        )
+
+        # A schedule switched off, or an account flipped to MANUAL, reads to a
+        # user as "stop posting". It did not stop posts already APPROVED - and
+        # with 26h of lookahead and a 60-minute review window, tomorrow's are
+        # normally approved already. Re-check both at publish time.
+        live_schedules = {
+            (s.brand, s.platform)
+            for s in session.query(Schedule).filter(Schedule.enabled.is_(True)).all()
+        }
+        manual_accounts = {
+            (a.brand, a.platform)
+            for a in session.query(Account).filter(Account.mode == PostMode.MANUAL).all()
+        }
+
+        due_ids = []
+        for pid, brand, platform, when in due_rows:
+            post = session.get(Post, pid)
+            # SQLite hands datetimes back NAIVE while everything written was
+            # UTC, so comparing one directly against an aware value raises
+            # TypeError. The audit flagged this as latent; this loop is where
+            # it became real.
+            if when is not None and when.tzinfo is None:
+                when = when.replace(tzinfo=dt.timezone.utc)
+            if when < stale_before:
+                post.status = PostStatus.REJECTED
+                post.error = (
+                    f"slot was {int((now - when).total_seconds() // 3600)}h old at "
+                    f"publish time (limit {MAX_SLOT_AGE_HOURS}h) - regenerate rather "
+                    f"than posting something stale"
+                )
+                log.info("post %s expired: scheduled %s", pid, when)
+                continue
+            if (brand, platform) not in live_schedules:
+                post.status = PostStatus.REVIEW
+                post.mode = PostMode.MANUAL
+                post.review_until = None
+                post.critic_notes = (
+                    f"held: the {brand}/{platform} schedule is switched off; "
+                    + (post.critic_notes or "")
+                )[:2000]
+                log.info("post %s held, schedule disabled", pid)
+                continue
+            if (brand, platform) in manual_accounts and post.mode == PostMode.AUTO:
+                post.mode = PostMode.MANUAL
+                post.status = PostStatus.REVIEW
+                post.review_until = None
+                log.info("post %s held, account switched to MANUAL", pid)
+                continue
+            due_ids.append(pid)
 
     for post_id in due_ids:
         if publish_claimed(post_id):

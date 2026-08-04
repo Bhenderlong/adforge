@@ -175,3 +175,81 @@ def test_job_ids_stay_unique_at_the_eviction_cap():
         uiapp.JOBS.clear()
     ids = {uiapp._job("same-name", lambda: None) for _ in range(25)}
     assert len(ids) == 25
+
+
+# --- publish-time guards ----------------------------------------------------
+# A backlog that built up while dry run was on stays APPROVED and past-due, so
+# without a staleness bound the first tick after going live fires all of it.
+
+def _engine_on_scratch(tmp_path):
+    """Reload the engine against a throwaway database."""
+    import importlib
+
+    from adforge.config import settings
+
+    settings.db_url = f"sqlite:///{tmp_path}/t.db"
+    import adforge.db as db
+
+    importlib.reload(db)
+    db.init_db()
+    import adforge.scheduler.engine as eng
+
+    importlib.reload(eng)
+    return db, eng
+
+
+def _seed(db, brand="inferix", schedule_enabled=True, age_hours=1,
+          account_mode=None):
+    from adforge.db import (Account, PostMode, PostStatus, Post, Schedule,
+                            session_scope, utcnow)
+
+    with session_scope() as s:
+        acct = Account(brand=brand, platform="x", enabled=True, dry_run=True,
+                       mode=account_mode or PostMode.AUTO,
+                       credentials="{}", options="{}")
+        s.add(acct)
+        s.flush()
+        s.add(Schedule(brand=brand, platform="x", enabled=schedule_enabled,
+                       posts_per_day=1, days_of_week="0,1,2,3,4,5,6",
+                       times="09:00"))
+        post = Post(brand=brand, platform="x", account_id=acct.id,
+                    status=PostStatus.APPROVED, mode=PostMode.AUTO,
+                    body="x" * 80, attempts=0,
+                    scheduled_for=utcnow() - dt.timedelta(hours=age_hours))
+        s.add(post)
+        s.flush()
+        return post.id
+
+
+def test_a_long_stale_slot_is_not_published(tmp_path):
+    db, eng = _engine_on_scratch(tmp_path)
+    pid = _seed(db, age_hours=eng.MAX_SLOT_AGE_HOURS + 6)
+    eng.promote_and_publish()
+    with db.session_scope() as s:
+        post = s.get(db.Post, pid)
+        assert post.status == db.PostStatus.REJECTED
+        assert "old at publish time" in post.error
+
+
+def test_turning_a_schedule_off_holds_already_approved_posts(tmp_path):
+    """'Stop posting' must stop posts already through the review window."""
+    db, eng = _engine_on_scratch(tmp_path)
+    pid = _seed(db, schedule_enabled=False)
+    eng.promote_and_publish()
+    with db.session_scope() as s:
+        post = s.get(db.Post, pid)
+        assert post.status == db.PostStatus.REVIEW
+        assert post.mode == db.PostMode.MANUAL
+        assert "schedule is switched off" in post.critic_notes
+
+
+def test_switching_an_account_to_manual_holds_approved_posts(tmp_path):
+    db, eng = _engine_on_scratch(tmp_path)
+    from adforge.db import PostMode
+
+    pid = _seed(db, account_mode=PostMode.MANUAL)
+    eng.promote_and_publish()
+    with db.session_scope() as s:
+        post = s.get(db.Post, pid)
+        assert post.mode == db.PostMode.MANUAL
+        assert post.status == db.PostStatus.REVIEW
