@@ -183,14 +183,34 @@ def _json_candidates(raw: str):
         yield raw[i : j + 1]
 
 
-def available_models() -> list[str]:
+class BackendDown(LLMError):
+    """The inference server could not be reached at all."""
+
+
+def available_models(raise_on_down: bool = False) -> list[str]:
+    """Model ids the backend exposes.
+
+    `raise_on_down` distinguishes "the server is not running" from "it is
+    running and has nothing loaded". Swallowing both into an empty list made
+    health() report a stopped Ollama as "reachable but exposes no models",
+    which points at the wrong fix entirely - you go looking for missing model
+    files when the daemon is simply down.
+    """
     try:
         with httpx.Client(timeout=10) as c:
             r = c.get(f"{settings.llm_base}/models")
             r.raise_for_status()
             return sorted(m["id"] for m in r.json().get("data", []))
-    except Exception as e:  # noqa: BLE001
+    except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout) as e:
+        log.warning("%s unreachable at %s: %s", settings.llm_backend,
+                    settings.llm_base, e)
+        if raise_on_down:
+            raise BackendDown(str(e)) from e
+        return []
+    except Exception as e:  # noqa: BLE001 - bad response shape, auth, etc.
         log.warning("model list unavailable: %s", e)
+        if raise_on_down:
+            raise BackendDown(str(e)) from e
         return []
 
 
@@ -212,9 +232,12 @@ def health(force: bool = False) -> tuple[bool, str]:
 
 def _health_uncached() -> tuple[bool, str]:
     try:
-        models = available_models()
+        models = available_models(raise_on_down=True)
         if not models:
-            return False, f"{settings.llm_backend} reachable but exposes no models"
+            return False, (
+                f"{settings.llm_backend} is running at {settings.llm_base} but has "
+                f"no models - pull one, e.g. `ollama pull {settings.model_writer}`"
+            )
         missing = [
             m
             for m in {settings.model_writer, settings.model_critic, settings.model_fast}
@@ -223,5 +246,14 @@ def _health_uncached() -> tuple[bool, str]:
         if missing:
             return False, f"missing model(s): {', '.join(sorted(missing))}"
         return True, f"{settings.llm_backend}: {len(models)} models"
+    except BackendDown:
+        hint = (
+            "start it with `systemctl start ollama`"
+            if settings.llm_backend == "ollama"
+            else "start your vLLM server"
+        )
+        return False, (
+            f"{settings.llm_backend} is NOT RUNNING at {settings.llm_base} - {hint}"
+        )
     except Exception as e:  # noqa: BLE001
         return False, str(e)
