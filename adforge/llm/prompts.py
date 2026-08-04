@@ -69,6 +69,20 @@ def _brand_block(brand: Brand) -> str:
     if brand.hard_rules:
         lines += ["", "!! ABSOLUTE RULES - violating these is a legal problem:"]
         lines += [f"  - {r.strip()}" for r in brand.hard_rules]
+
+    # Showing the register beats describing it. Without these the model
+    # reliably produces feature lists that technically obey every rule above
+    # and still read as an advertisement.
+    if brand.exemplars:
+        lines += [
+            "",
+            "EXAMPLES OF THE STANDARD TO HIT. Study how each one earns its "
+            "product mention by teaching something first, and how the CTA "
+            "follows from the content instead of being appended to it. Match "
+            "this depth. Do NOT reuse their subjects or phrasing:",
+        ]
+        for ex in brand.exemplars:
+            lines += ["", "  ---", "  " + ex.strip().replace("\n", "\n  ")]
     return "\n".join(lines)
 
 
@@ -210,12 +224,35 @@ Score each dimension 1-10:
   human      - would a smart practitioner believe a person wrote this?
   value      - does the reader leave with something they can use?
   brand_fit  - right register for the platform and audience.
+  coherence  - is this ONE argument, or an unrelated fact with a product pitch
+               stapled to it? If the opening statement and the product sentence
+               do not connect, coherence is 1-3 no matter how true both are.
 
-Be harsh. A competent-but-forgettable post scores 5. Only genuinely strong copy
-scores 8+. Note every cliche, hedge and filler phrase you find.
+CALIBRATION - these are the real failure modes, score them this low:
+
+  "LoRA reduces VRAM usage. Inferix GPU cloud offers verified hardware and
+   per-second billing. Try it at inferix.co"
+  -> coherence 2, value 3, hook 3. Two disconnected sentences. The fact is
+     textbook-shallow and the product line has nothing to do with it. This is
+     the single most common failure and you must catch it.
+
+  "Deploy OpenAI-compatible endpoints. Change one base URL. No lock-in.
+   Manage everything from the dashboard."
+  -> specificity 4, value 3. A feature list, not an idea. Tells the reader
+     nothing they could act on.
+
+  A post that states a real mechanism, shows why it bites in practice, and
+  reaches the product only because it is the natural next step
+  -> 8+.
+
+Be harsh. A competent-but-forgettable post scores 5. Most drafts are a 5.
+Only copy that teaches something scores 8+.
+
+Set "overall" to the LOWEST dimension score, not the average. One fatal
+weakness ruins a post; it does not get averaged away by the others.
 
 Reply with ONLY JSON:
-{"hook":n,"specificity":n,"human":n,"value":n,"brand_fit":n,
+{"hook":n,"specificity":n,"human":n,"value":n,"brand_fit":n,"coherence":n,
  "overall":n,"verdict":"PASS"|"REVISE","problems":["..."],"fix":"one concrete instruction"}
 """
 

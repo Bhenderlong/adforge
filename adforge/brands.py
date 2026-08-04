@@ -35,6 +35,9 @@ class Brand:
     visual: dict
     voice: dict
     hard_rules: list[str] = field(default_factory=list)
+    # Hand-written model posts, shown to the writer as in-context examples.
+    # Describing the register does not teach it; showing it does.
+    exemplars: list[str] = field(default_factory=list)
 
     def pick_pillar(self, rng: random.Random | None = None) -> Pillar:
         rng = rng or random
@@ -47,7 +50,7 @@ class Brand:
         raise ValueError(f"{self.key}: no pillar {key!r}")
 
 
-_STR_LISTS = ("proof_points", "keywords", "cta_variants", "hard_rules")
+_STR_LISTS = ("proof_points", "keywords", "cta_variants", "hard_rules", "exemplars")
 
 
 def _load(path: Path) -> Brand:

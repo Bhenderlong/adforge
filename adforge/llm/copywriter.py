@@ -135,12 +135,28 @@ def factcheck(text: str, brand: Brand) -> list[str]:
     return out
 
 
+DIMENSIONS = ("hook", "specificity", "human", "value", "brand_fit", "coherence")
+
+
 def _score_of(verdict: dict) -> float:
+    """Worst dimension, not the average.
+
+    A post with one fatal weakness - typically an unrelated fact with a product
+    pitch stapled on, which scores 2 for coherence - used to average out to a
+    passing 8 because the other five dimensions were fine. The weakest link is
+    what a reader actually notices, so it is what gates publication. The
+    critic is told to report `overall` this way too; this recomputes it rather
+    than trusting the model to have done the arithmetic.
+    """
+    vals = [
+        float(verdict[d]) for d in DIMENSIONS
+        if isinstance(verdict.get(d), (int, float))
+    ]
+    if vals:
+        return min(vals)
     if isinstance(verdict.get("overall"), (int, float)):
         return float(verdict["overall"])
-    dims = ["hook", "specificity", "human", "value", "brand_fit"]
-    vals = [float(verdict[d]) for d in dims if isinstance(verdict.get(d), (int, float))]
-    return sum(vals) / len(vals) if vals else 5.0
+    return 5.0
 
 
 def write_post(

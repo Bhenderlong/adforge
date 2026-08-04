@@ -39,15 +39,22 @@ pillars:
     label: What is new in open AI
     description: >
       A specific, recent development in open models, inference tooling or GPU
-      hardware, explained for a practitioner, with a concrete takeaway. Ties
-      back to Inferix only where genuinely relevant.
+      hardware, explained for a practitioner, with a concrete takeaway - what
+      changes about how they should work, not just that the thing exists. Ties
+      back to Inferix only where genuinely relevant; a post with no natural
+      connection should simply not mention it.
   - key: tips
     weight: 3
     label: Tips and tricks working with AI
     description: >
       A single actionable technique - quantization tradeoffs, batching, KV
-      cache, LoRA, prompt caching, serving throughput, VRAM math. Must contain
-      something a reader can act on today.
+      cache, LoRA, prompt caching, serving throughput, VRAM math. It must
+      explain the MECHANISM and why it bites in practice, not just state that
+      the technique exists. "LoRA reduces VRAM usage" is a textbook definition
+      and is worthless; "a 7B in fp16 needs ~14GB for weights before any KV
+      cache, which is why a 16GB card OOMs at long context and a 24GB one does
+      not" is a post. The product may only appear where it is the natural next
+      step for someone who just learned this - never bolted on at the end.
   - key: cost
     weight: 2
     label: The economics of running models
@@ -60,7 +67,9 @@ pillars:
     label: Product capability
     description: >
       One capability, shown rather than described - the endpoint swap, dataset
-      versioning, Spaces, renting a verified GPU.
+      versioning, Spaces, renting a verified GPU. Lead with the problem it
+      removes, in the reader's terms. A list of features is not a post; pick
+      one and show what working with it actually looks like.
   - key: build_in_public
     weight: 1
     label: Build in public
@@ -77,6 +86,33 @@ keywords:
   - model hosting
   - RTX 5090
   - self-hosted AI
+
+# Few-shot exemplars. Describing the register does not teach it - the model
+# reliably produced feature lists until it was shown posts instead. These are
+# hand-written, never published, and exist only as in-context examples. Keep
+# them short and keep them honest: the model copies their habits, including
+# any bad ones.
+exemplars:
+  - >
+    A 7B model in fp16 is ~14GB of weights before you have allocated a single
+    token of KV cache. That is the whole reason a 16GB card dies at long
+    context while a 24GB card on the identical model does not. Work out
+    2 x layers x kv_heads x head_dim x seq_len x 2 bytes for your actual
+    context length before you pick hardware, not after. If it lands between
+    two cards, renting the bigger one by the hour is cheaper than guessing
+    wrong. https://inferix.co
+  - >
+    Swapping inference providers used to mean rewriting client code. It does
+    not anymore - if the endpoint is OpenAI-compatible you change base_url and
+    everything downstream keeps working, including the SDK retry logic you
+    already tuned. Worth checking before you accept a migration estimate that
+    assumes a rewrite. https://inferix.co
+  - >
+    We shipped a GPU verification step and immediately found listings whose
+    advertised card did not match what the driver reported. Not fraud in most
+    cases - stale listings, mixed hosts, a rebuilt box nobody re-registered.
+    But it means "RTX 4090" on a marketplace is a claim, not a measurement.
+    Ask what verifies it. https://inferix.co
 
 cta_variants:
   - Free account at inferix.co

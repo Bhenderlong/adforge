@@ -75,6 +75,30 @@ keywords:
   - audit evidence
   - self-hosted
 
+# Few-shot exemplars - see the note in inferix.yaml. Hand-written, never
+# published, in-context examples only.
+exemplars:
+  - >
+    The access review that passes an audit is not the one you ran last week.
+    It is the one where you can show who approved it, against what role
+    definition, and what happened to the three accounts you flagged. Auditors
+    ask for the exceptions, not the clean rows - a review with zero findings
+    reads as a review nobody actually did. Keep the remediation trail attached
+    to the review itself. https://vallorix.ai
+  - >
+    ISO 27001:2022 renumbered every Annex A control. If your policy set still
+    cites A.9.2.3 you are referencing a standard that no longer exists, and an
+    auditor will treat the mapping as unmaintained even where the underlying
+    control is fine. The access-rights content now lives in A.5.18. Worth a
+    grep through your policy library before your next surveillance visit.
+    https://vallorix.ai
+  - >
+    The most common reason a GRC purchase stalls has nothing to do with the
+    product. It is a customer contract saying production data does not leave
+    the environment, and a tool that requires uploading evidence into a vendor
+    tenant cannot satisfy it. If that clause is in your contracts, check it
+    before the procurement cycle rather than during. https://vallorix.ai
+
 cta_variants:
   - See how it works at vallorix.ai
   - "Self-host it yourself: vallorix.ai"
