@@ -29,7 +29,16 @@ from ComfyUI, publishing through each platform's official API.
 cd ~/adforge
 ./venv/bin/python run.py --check     # preflight: models, engine, ffmpeg, GPUs
 ./venv/bin/python run.py             # UI + scheduler on http://127.0.0.1:8770
+./venv/bin/python run.py --selftest  # preflight + tests + mutation checks
+./venv/bin/python run.py --worker    # scheduler only, no UI
+./venv/bin/python run.py --auth reddit   # where each platform's credentials live
 ```
+
+`--selftest` is the one worth knowing about. It runs the preflight and the test
+suite, then **breaks each safety guard in turn and requires the suite to
+notice**. A green suite proves nothing on its own — one of these tests
+originally passed on the exact routing bug it was written to catch. Every file
+is restored in a `finally` block.
 
 Everything ships **disabled and dry-run**. Nothing reaches a platform until you
 enable an account *and* turn dry-run off.
@@ -61,6 +70,29 @@ Recommended first hour:
 The UI has **no authentication**. Keep it on `127.0.0.1` unless you put an
 authenticating reverse proxy in front — it holds every credential you enter.
 
+## The safety model
+
+Four independent things must all be true before anything reaches a platform.
+They are separate on purpose: each one has been the last line of defence at
+some point.
+
+| Gate | Where | Fails to |
+|---|---|---|
+| Global dry run | Settings | on — turning it off needs `GO LIVE` typed in full, so a partial or malformed save can only ever leave it on |
+| Account enabled | Accounts | off — every destination ships disabled |
+| Per-account transmission | Accounts | dry run — **enabling an account while the global switch is off pins it to dry run**, so publishing is never started by inheritance |
+| Review window | Settings | 60 minutes — a post that failed the quality bar waits for a human regardless of this |
+
+Three hazards found in testing came from combinations rather than any single
+setting being wrong, so the UI now surfaces them where the decision is made:
+
+- **Schedules** warns when the configured cadence exceeds what the machine can
+  generate (~12 min/post on a 70B). Slots that cannot be filled fail silently.
+- **Settings** warns when review window 0 + enabled + AUTO + transmitting line
+  up into fully unattended publishing, and names the pillars that makes risky.
+- **Reddit** binds its "I have read the rules" confirmation to the subreddit
+  name it was granted for, and ignores it entirely for sitewide targets.
+
 ## How copy quality is enforced
 
 A draft must pass a deterministic gate *and* an LLM critic before it can be
@@ -83,7 +115,21 @@ published. The gate is code, not prompting, because some of it is a legal matter
   ISO 27001:2013 numbering. Both are blocked, and the real control text is
   injected into the prompt so it writes about a control that exists.
 - **Platform format** — length, hashtag count, link policy. Copy over the limit
-  is regenerated, never truncated.
+  is regenerated, never truncated. Backticks and `**bold**` are blocked where
+  they publish as literal characters (everywhere except Reddit, Discord, Slack).
+- **Invented statistics and citations** — "27% of control failures", "1 of 5
+  customer contracts", "according to our review of publicly filed agreements".
+  Research nobody did, quoted to people who will ask for the source.
+- **First-person anecdotes** — "I once spent hours debugging…", and the
+  subject-dropped form "Ran a 5B model and watched it die". Nobody at the
+  company did that.
+- **Mistyped hashtags** — a near-miss of the brand's own vocabulary (`#gpucould`
+  for `#gpucloud`). A typo'd tag is followed by nobody; it looks like reach and
+  is not.
+- **Motivational filler** — "train smarter, not harder", "just got easier".
+
+Every one of these was found by reading real generated output, not by reading
+code. The LLM critic scored each of them 8/10 — it judges style, not facts.
 
 Anything that fails the bar is routed to a human regardless of the account mode.
 
@@ -152,6 +198,39 @@ The rest you copy directly — `--auth <name>` tells you where:
 identity call to the platform and reports who you are authenticated as — which
 also catches valid credentials pointing at the wrong account. Field-presence
 checking cannot tell you that; asking the platform can.
+
+## Throughput
+
+Measured on this box: **roughly 12 minutes per post** on a 70B across two
+5090s — angle, up to four write attempts, critic, factcheck and an image. A
+video post costs several times that.
+
+So the realistic ceiling is **8–12 text posts a day**, not the 108 the daily cap
+would theoretically allow. Schedules shows the arithmetic and warns past 20
+hours of estimated generation. If you want more throughput the lever is
+`model_writer` on Settings — a 14B runs in about a fifth the time, at some cost
+in the copy.
+
+That constraint argues for fewer, better posts, which is the same direction the
+quality gate pushes anyway.
+
+## What else it does
+
+**X threads.** Where an idea genuinely needs more than 280 characters, the
+writer produces a thread and the adapter chains it as replies. Every tweet is
+gated exactly like a standalone post; if fewer than two survive, it posts the
+single vetted tweet instead of a fragment.
+
+**Engagement collection.** Every two hours, read-only, for posts published in
+the last 72 hours: X, LinkedIn, Facebook, Instagram, YouTube and Reddit.
+Discord, Slack and TikTok are deliberately absent — they expose no per-post
+engagement to a bot, and claiming to measure them would be worse than saying
+nothing. A `fetched` flag separates "the platform reported zero" from "the
+platform reported nothing", so a rate limit never reads as failed content.
+
+**Credential verification.** "Test connection" on Accounts makes a read-only
+identity call and reports who you are authenticated as — which also catches
+valid credentials pointing at the wrong account. Nothing in that path can post.
 
 ## Per-platform notes that actually bite
 
