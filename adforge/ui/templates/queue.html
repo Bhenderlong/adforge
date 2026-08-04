@@ -95,7 +95,7 @@
           {% elif 'media failed' in p.critic_notes %}
             <br><span class="pill warn" title="{{ p.critic_notes }}">media failed</span>
           {% elif 'likely incorrect' in p.critic_notes %}
-            <br><span class="pill warn" title="{{ p.critic_notes }}">check facts</span>
+            <br><span class="pill warn" title="The checker flags roughly half of correct long posts too - this means READ IT, not that it is wrong. {{ p.critic_notes }}">check facts</span>
           {% endif %}
         {% endif %}
       </td>

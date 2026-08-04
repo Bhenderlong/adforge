@@ -89,6 +89,18 @@ Anything that fails the bar is routed to a human regardless of the account mode.
 
 ### What the gates cannot do
 
+**The technical-claim checker is noisy, deliberately.** Measured on real output:
+whole-post checking caught a genuinely wrong claim 0 times in 4 runs; checking
+in chunks caught it 3/3 but also flagged 2 of 4 correct posts. A second pass
+re-judging each flag against the full text made both numbers worse, so it was
+removed.
+
+Chunking was kept because the asymmetry favours it - a wrong claim in front of
+engineers is expensive, a false flag costs a click. Treat a **check facts**
+badge as "read this post", not "this post is wrong". On long Inferix technical
+posts it will fire often.
+
+
 They catch invented product claims, invented benchmarks, invented control
 numbers, banned phrasing and incoherent structure. They **cannot verify
 arbitrary technical assertions**. A local model will state that an RTX 4090

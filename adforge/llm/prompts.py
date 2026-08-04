@@ -424,3 +424,36 @@ Every tweet must be under 270 characters."""
         {"role": "system", "content": THREAD_SYSTEM},
         {"role": "user", "content": user},
     ]
+
+
+VERIFY_SYSTEM = """\
+You are checking whether ONE flagged claim is genuinely wrong, given the full
+text it appeared in.
+
+A claim flagged from an isolated fragment is often correct once its context is
+visible - a figure explained two sentences later, a shorthand the surrounding
+text defines. Your job is to overturn those.
+
+Answer WRONG only if the claim is factually incorrect as written, in context,
+and you can say specifically why. Uncertainty, imprecision, simplification and
+"depends on the setup" are all CORRECT for this purpose - a post is not a paper.
+
+Reply with ONLY JSON:
+{"wrong": true|false, "why": "one sentence"}
+"""
+
+
+def verify_claim_prompt(claim: str, full_text: str) -> list[dict]:
+    user = f"""FULL POST:
+---
+{full_text}
+---
+
+FLAGGED CLAIM:
+{claim}
+
+Is that claim actually wrong, read in context?"""
+    return [
+        {"role": "system", "content": VERIFY_SYSTEM},
+        {"role": "user", "content": user},
+    ]

@@ -220,6 +220,30 @@ UNVERIFIABLE = [
     (r"(?i)\b(?:most|many|half|a (?:third|quarter)|\d+ in \d+)\s+of\s+(?:our|my)\s+"
      r"(?:users|customers|teams|developers|companies|clients)\b",
      "invented_user_statistic"),
+    # Any proportion presented as a finding about a population. Two real posts
+    # shipped "27% of control failures are due to inadequate documentation" and
+    # "this shows up in 1 of 5 customer contracts" - invented research, quoted
+    # to compliance professionals who will ask for the source.
+    (r"(?i)\b\d+(?:\.\d+)?\s*(?:%|percent)\s+of\s+\w+", "invented_statistic"),
+    # "1 in 5", "1 of 5", "2 out of 3" followed by a plural noun. Both numbers
+    # must be numeric or spelled out with no article between, so "one of the
+    # three regions" (a fact) does not match while "1 of 5 contracts" (a
+    # survey nobody ran) does.
+    # Allow an adjective or two before the plural noun: the real case was
+    # "1 of 5 customer contracts", where the plural is not adjacent to the
+    # number.
+    (r"(?i)\b(?:\d+|one|two|three|four)\s+(?:in|of|out of)\s+\d+\s+"
+     r"(?:\w+\s+){0,2}\w+s\b",
+     "invented_statistic"),
+    # An invented citation is worse than an unsourced number, because it claims
+    # provenance: "according to our review of publicly filed agreements".
+    (r"(?i)\baccording to (?:our|my|internal|a recent)\s+"
+     r"(?:review|study|analysis|research|survey|data|audit|report)",
+     "invented_citation"),
+    (r"(?i)\b(?:our|my)\s+(?:review|study|analysis|research|survey)\s+of\b",
+     "invented_citation"),
+    (r"(?i)\b(?:studies|research|data)\s+(?:show|shows|suggest|suggests|"
+     r"indicate|indicates)\b", "invented_citation"),
     (r"(?i)\b\d[\d,]*\+?\s+(?:happy\s+)?(?:customers|users|teams|developers|companies)\b", "user_counts"),
     (r"(?i)(?:#1|\bnumber one\b|\bthe leading\b|\bmarket[- ]leading\b|"
      r"\bbest[- ]in[- ]class\b)", "superlative_claim"),

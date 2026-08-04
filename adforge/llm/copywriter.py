@@ -102,6 +102,34 @@ def critique(text: str, brand: Brand, ps: PlatformSpec, pillar: Pillar) -> dict:
         return {"overall": 6.0, "verdict": "PASS", "problems": [], "fix": ""}
 
 
+# Recall collapses on long text. Measured on a real Facebook post: a wrong
+# claim ("a 7B in fp16 needs to move ~28GB for a single batch") was flagged
+# 5/5 times in a 280-char excerpt and 0/4 times inside the full 858-char post,
+# buried among correct material. Long-form platforms are exactly where the
+# expensive mistakes live, so anything past this is checked in pieces.
+FACTCHECK_CHUNK = 400
+
+
+def _chunks(text: str, size: int = FACTCHECK_CHUNK) -> list[str]:
+    """Split on sentence boundaries into pieces small enough to be checked.
+
+    Overlapping is deliberate: a claim spanning a boundary would otherwise be
+    seen by neither chunk with enough context to judge it.
+    """
+    sentences = re.split(r"(?<=[.!?])\s+", text.strip())
+    out, cur = [], ""
+    for s in sentences:
+        if cur and len(cur) + len(s) + 1 > size:
+            out.append(cur.strip())
+            # Carry the last sentence forward for context.
+            cur = (cur.split(". ")[-1] + " " + s) if len(cur) > size // 2 else s
+        else:
+            cur = f"{cur} {s}".strip()
+    if cur.strip():
+        out.append(cur.strip())
+    return out or [text]
+
+
 def factcheck(text: str, brand: Brand) -> tuple[list[str], list[str]]:
     """Product claims in the copy that the brand profile does not support.
 
@@ -111,16 +139,25 @@ def factcheck(text: str, brand: Brand) -> tuple[list[str], list[str]]:
     not exist. Only a model comparing the copy against the approved claims
     catches that class of error.
     """
-    try:
-        data = chat_json(
-            prompts.factcheck_prompt(text, brand),
-            models=settings.critic_chain,
-            temperature=0.1,
-            max_tokens=600,
-        )
-    except LLMError as e:
-        log.warning("factcheck failed, allowing through: %s", e)
-        return [], []
+    pieces = _chunks(text) if len(text) > FACTCHECK_CHUNK else [text]
+    data: dict = {}
+    for piece in pieces:
+        try:
+            part = chat_json(
+                prompts.factcheck_prompt(piece, brand),
+                models=settings.critic_chain,
+                temperature=0.1,
+                max_tokens=600,
+            )
+        except LLMError as e:
+            log.warning("factcheck failed on a chunk, skipping it: %s", e)
+            continue
+        for key in ("unsupported_product_claims", "unsupported",
+                    "unverified_technical_claims"):
+            if part.get(key):
+                data.setdefault(key, []).extend(part[key])
+    if not data and len(pieces) > 1:
+        log.debug("factcheck: %d chunk(s), nothing flagged", len(pieces))
 
     def _collect(key: str, label: str) -> list[str]:
         out = []
@@ -140,6 +177,21 @@ def factcheck(text: str, brand: Brand) -> tuple[list[str], list[str]]:
     product = _collect("unsupported_product_claims", "unsupported product claim")
     product += _collect("unsupported", "unsupported product claim")
     technical = _collect("unverified_technical_claims", "likely incorrect")
+
+    # MEASURED, and the numbers are not flattering. Whole-post checking found
+    # a real error ("a 7B in fp16 must move ~28GB for a single batch") 0 times
+    # in 4 runs; chunking found it 3/3. But chunking also flagged 2 of 4
+    # known-good posts, because a fragment lacks the context that makes a claim
+    # correct.
+    #
+    # A second pass re-judging each candidate against the full text was tried
+    # and made it strictly worse: it overturned the REAL error and kept both
+    # false positives. That stage is gone rather than kept as complexity that
+    # does not pay.
+    #
+    # So: chunking stays, because a wrong technical claim in front of engineers
+    # is the expensive failure and a false flag only costs a click. This signal
+    # is NOISY BY CONSTRUCTION - it means "read this post", not "this is wrong".
     return product, technical
 
 
