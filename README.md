@@ -39,8 +39,9 @@ Recommended first hour:
 1. **Settings** — confirm the writer model. Leave global dry run **on**.
 2. **Compose** — generate one post per brand. Read them. Adjust
    `brands/*.yaml` on the **Brands** page until the voice is right.
-3. **Accounts** — add credentials for one platform. Keep dry-run on and watch
-   the log show you the exact payload it would send.
+3. **Accounts** — add credentials for one platform (see *Getting credentials*
+   below), press **Test connection**, then keep dry-run on and watch the log
+   show you the exact payload it would send.
 4. **Schedules** — set a cadence. Let it generate for a day with nothing live.
 5. Only then turn a single account live.
 
@@ -107,6 +108,39 @@ Keep a review window on the Inferix technical pillars. `tips`, `cost` and
 `ai_news` are where a confident wrong statement is most likely and most
 expensive - a technical audience tests what you tell them.
 
+## Getting credentials
+
+Four platforms need an OAuth flow, and **none of them shows you a usable token
+in a settings page**. YouTube Studio's Channel ID and User ID are not
+credentials; Meta's console shows a user token that expires in an hour and is
+the wrong kind anyway; TikTok shows nothing at all. In each case the credential
+is the *output* of an authorisation you perform once:
+
+```bash
+./venv/bin/python run.py --auth youtube  --client-id ... --client-secret ...
+./venv/bin/python run.py --auth linkedin --client-id ... --client-secret ...
+./venv/bin/python run.py --auth meta     --client-id ... --client-secret ...   # facebook + instagram
+./venv/bin/python run.py --auth tiktok   --client-id ... --client-secret ...
+```
+
+Run any of them **with no arguments** and it prints that platform's setup steps
+first. Register `http://localhost:8791/callback` as the redirect URI (YouTube
+uses its own loopback port and needs a **Desktop app** client, not "Web").
+
+The rest you copy directly — `--auth <name>` tells you where:
+
+| Platform | Where |
+|---|---|
+| **Reddit** | `old.reddit.com/prefs/apps` → create app → type **script**. The `client_id` is the *unlabelled* string under the app name. |
+| **X** | `developer.x.com` → your app → Keys and tokens. Set the app to **Read + Write before** generating the access token, or it 403s. |
+| **Discord** | A channel webhook URL (Edit Channel → Integrations), or a bot token for the radar. |
+| **Slack** | `api.slack.com/apps` → OAuth & Permissions → Bot token. |
+
+**Then press "Test connection" on the Accounts page.** It makes a read-only
+identity call to the platform and reports who you are authenticated as — which
+also catches valid credentials pointing at the wrong account. Field-presence
+checking cannot tell you that; asking the platform can.
+
 ## Per-platform notes that actually bite
 
 | Platform | What to know |
@@ -116,8 +150,8 @@ expensive - a technical audience tests what you tell them.
 | **Facebook** | Needs a **page** token, not a user token. |
 | **Instagram** | The API cannot accept a file upload — Meta fetches the media from a public HTTPS URL, so `public_media_base` must be internet-reachable. |
 | **TikTok** | Until your app passes TikTok's audit it can **only reach drafts**. You finish posting in the app. Not a limitation of this tool. |
-| **YouTube** | Vertical ≤60s is classified as a Short automatically; there is no API flag. |
-| **Reddit** | Refuses to post to any subreddit you have not explicitly allowlisted, and omits links unless you have confirmed they are permitted. |
+| **YouTube** | Vertical ≤60s is classified as a Short automatically; there is no API flag. If the consent screen is left in **Testing**, the refresh token expires after 7 days — click PUBLISH APP. |
+| **Reddit** | Refuses to post to any subreddit you have not explicitly allowlisted, and omits links unless you have confirmed they are permitted. The allowlist is bound to the subreddit *name* it was granted for, so retyping the field revokes it. **2FA on the account breaks script auth entirely** — the 401 looks exactly like a wrong password. |
 | **Discord** | A webhook is enough to post. A bot token is only needed for the radar. |
 
 ## The radar, and what it deliberately does not do
