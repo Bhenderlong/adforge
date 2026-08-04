@@ -108,6 +108,49 @@ async def _same_origin_only(request: Request, call_next):
     return await call_next(request)
 
 
+from fastapi.exceptions import RequestValidationError
+
+
+@app.exception_handler(RequestValidationError)
+async def _form_errors(request: Request, exc: RequestValidationError):
+    """Render form validation failures as readable text, not raw JSON.
+
+    FastAPI's default is a JSON blob like
+    {"detail":[{"type":"missing","loc":["body","target"],...}]}
+    which is shown to whoever submitted the form. That is unusable: it names
+    the field but not what to do, and it replaces the page.
+    """
+    missing, bad = [], []
+    for err in exc.errors():
+        loc = [str(x) for x in err.get("loc", []) if x not in ("body", "query")]
+        field = ".".join(loc) or "a field"
+        if err.get("type") == "missing":
+            missing.append(field)
+        else:
+            bad.append(f"{field}: {err.get('msg', 'invalid')}")
+
+    if request.method == "GET" or "text/html" not in request.headers.get("accept", ""):
+        return JSONResponse({"detail": exc.errors()}, status_code=422)
+
+    parts = []
+    if missing:
+        parts.append("Required field(s) not received: " + ", ".join(missing))
+    if bad:
+        parts.append("; ".join(bad))
+    log.warning("form validation failed on %s: %s", request.url.path, exc.errors())
+    return HTMLResponse(
+        "<!doctype html><meta charset=utf-8>"
+        "<style>body{font:15px system-ui;background:#0b0f14;color:#e2e8f0;"
+        "padding:2.5rem;max-width:44rem}a{color:#06b6d4}code{color:#8fa3bd}</style>"
+        f"<h2>That form could not be saved</h2><p>{'. '.join(parts)}.</p>"
+        "<p>If the field looked filled in, the browser did not send it - most "
+        "often because the page was left open across a restart. Reload the page "
+        "and try again.</p>"
+        f'<p><a href="{request.headers.get("referer", "/")}">Back</a></p>',
+        status_code=422,
+    )
+
+
 app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
 templates = Jinja2Templates(directory=HERE / "templates")
 
@@ -918,15 +961,25 @@ def radar(request: Request, brand: str = "", min_rel: float = 0.0):
 def radar_target_new(
     brand: str = Form(...),
     source: str = Form(...),
-    target: str = Form(...),
+    # Empty-but-present is the common case (the user left it blank), and it
+    # deserves a sentence rather than a validation blob.
+    target: str = Form(""),
     keywords: str = Form(""),
     promo_allowed: str = Form(""),
     rules_note: str = Form(""),
     min_relevance: float = Form(0.6),
 ):
+    cleaned = target.strip().lstrip("/").removeprefix("r/")
+    if not cleaned:
+        raise HTTPException(
+            400,
+            "Target is required. Use 'all' to search the whole of Reddit, "
+            "'*' for every Discord channel your bot can read, or name one "
+            "subreddit (without the r/) or one guild_id/channel_id.",
+        )
     with session_scope() as s:
         s.add(RadarTarget(
-            brand=brand, source=source, target=target.strip().lstrip("r/"),
+            brand=brand, source=source, target=cleaned,
             keywords=keywords, enabled=True,
             promo_allowed=bool(promo_allowed), rules_note=rules_note,
             min_relevance=min_relevance,
