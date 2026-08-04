@@ -155,3 +155,45 @@ def test_score_is_the_worst_dimension_not_the_average():
 def test_score_falls_back_to_overall_when_dimensions_are_missing():
     assert _score_of({"overall": 7}) == 7.0
     assert _score_of({}) == 5.0
+
+
+# --- republish guard --------------------------------------------------------
+
+def test_a_post_with_a_remote_id_is_never_sent_again():
+    """A 5xx after the platform accepted the post must not duplicate it.
+
+    Retryable failures are re-queued, but the platform may have accepted the
+    post before the connection broke. Where an id was recorded, sending again
+    would publish a second copy - and a duplicate is worse than a miss, since
+    only the miss is fixable from the queue.
+    """
+    import json
+
+    from adforge.db import Post
+    from adforge.platforms.base import PublishError
+    from adforge.platforms.registry import publish_post
+
+    acct = Account(brand="inferix", platform="discord", dry_run=False,
+                   credentials=json.dumps({"webhook_url": "https://discord.com/api/webhooks/1/abc"}),
+                   options="{}")
+    post = Post(brand="inferix", platform="discord",
+                body="Body copy long enough to clear the length gate here.",
+                remote_id="1234567890")
+    with pytest.raises(PublishError, match="already published"):
+        publish_post(post, acct)
+
+
+def test_the_republish_guard_does_not_block_a_dry_run():
+    """Dry runs must stay repeatable - nothing was transmitted."""
+    import json
+
+    from adforge.db import Post
+    from adforge.platforms.registry import publish_post
+
+    acct = Account(brand="inferix", platform="discord", dry_run=True,
+                   credentials=json.dumps({"webhook_url": "https://discord.com/api/webhooks/1/abc"}),
+                   options="{}")
+    post = Post(brand="inferix", platform="discord",
+                body="Body copy long enough to clear the length gate here.",
+                remote_id="1234567890")
+    assert publish_post(post, acct).dry_run is True

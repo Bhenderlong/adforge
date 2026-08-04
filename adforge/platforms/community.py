@@ -278,15 +278,17 @@ class TikTokAdapter(BaseAdapter):
             if not upload_url:
                 raise PublishError(f"tiktok init returned no upload_url: {data}")
 
-            put = c.put(
-                upload_url,
-                content=path.read_bytes(),
-                headers={
-                    "Content-Type": "video/mp4",
-                    "Content-Range": f"bytes 0-{size - 1}/{size}",
-                },
-                timeout=1800,
-            )
+            # Streamed: this is the full rendered mp4.
+            with path.open("rb") as fh:
+                put = c.put(
+                    upload_url,
+                    content=fh,
+                    headers={
+                        "Content-Type": "video/mp4",
+                        "Content-Range": f"bytes 0-{size - 1}/{size}",
+                    },
+                    timeout=1800,
+                )
             if put.status_code >= 400:
                 raise PublishError(f"tiktok upload failed: {put.status_code}")
 

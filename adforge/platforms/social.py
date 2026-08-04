@@ -9,6 +9,7 @@ separate page token.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import mimetypes
@@ -174,12 +175,16 @@ class LinkedInAdapter(BaseAdapter):
         url = value["uploadMechanism"][
             "com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest"
         ]["uploadUrl"]
-        up = client.put(
-            url,
-            content=path.read_bytes(),
-            headers={"Authorization": f"Bearer {creds['access_token']}"},
-            timeout=600,
-        )
+        # Stream from the file rather than materialising it. A 40s vertical
+        # short is hundreds of MB, and this process also serves the web UI and
+        # runs a 2-worker job pool.
+        with path.open("rb") as fh:
+            up = client.put(
+                url,
+                content=fh,
+                headers={"Authorization": f"Bearer {creds['access_token']}"},
+                timeout=600,
+            )
         if up.status_code >= 400:
             raise PublishError(f"linkedin asset upload failed: {up.status_code}")
         return value["asset"]
@@ -414,7 +419,8 @@ class SlackAdapter(BaseAdapter):
                 )
                 if not ext.get("ok"):
                     raise PublishError(f"slack upload url: {ext.get('error')}")
-                client.post(ext["upload_url"], content=p.read_bytes(), timeout=600)
+                with p.open("rb") as fh:
+                    client.post(ext["upload_url"], content=fh, timeout=600)
                 done = _raise_for(
                     client.post(
                         "https://slack.com/api/files.completeUploadExternal",
@@ -477,18 +483,23 @@ class DiscordAdapter(BaseAdapter):
 
         text = payload.body + (f"\n{payload.link}" if payload.link else "")
         media = payload.video or payload.image
-        files = None
-        if media and Path(media).exists():
-            p = Path(media)
-            files = {
-                "files[0]": (
-                    p.name, p.read_bytes(),
-                    mimetypes.guess_type(p.name)[0] or "application/octet-stream",
-                )
-            }
+        path = Path(media) if media and Path(media).exists() else None
 
         self.throttle(f"discord:{creds.get('webhook_url') or creds.get('channel_id')}")
-        with httpx.Client(timeout=300) as client:
+        # The file handle is opened for the duration of the request and closed
+        # by the context manager, so httpx streams it rather than the whole
+        # video sitting in memory alongside the web server and job pool.
+        with contextlib.ExitStack() as stack, httpx.Client(timeout=300) as client:
+            files = None
+            if path is not None:
+                fh = stack.enter_context(path.open("rb"))
+                files = {
+                    "files[0]": (
+                        path.name, fh,
+                        mimetypes.guess_type(path.name)[0]
+                        or "application/octet-stream",
+                    )
+                }
             if url := creds.get("webhook_url"):
                 r = client.post(
                     f"{url}?wait=true",

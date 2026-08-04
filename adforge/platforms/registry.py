@@ -84,6 +84,22 @@ def publish_post(post: Post, account: Account | None) -> Result:
             f"{ps.max_chars} - edit it before publishing"
         )
 
+    # Refuse to send anything that already has a remote id.
+    #
+    # A 5xx or a read timeout is classed retryable and re-queued, but the
+    # platform may well have accepted the post before the connection broke.
+    # Where the adapter got far enough to record an id, retrying would publish
+    # a second copy. Without platform idempotency keys this cannot be made
+    # airtight, but it closes the case we can actually detect - and a duplicate
+    # post is worse than a missing one, because only the missing one is fixable
+    # from the queue.
+    if post.remote_id and not dry:
+        raise PublishError(
+            f"already published as {post.remote_id} - refusing to send again. "
+            f"If that post is genuinely missing, clear the remote id first.",
+            retryable=False,
+        )
+
     # `attempts` is incremented by the claim in scheduler.engine.claim_post,
     # which is what makes the retry cap meaningful across processes. Doing it
     # again here would double-count and halve the effective cap.
