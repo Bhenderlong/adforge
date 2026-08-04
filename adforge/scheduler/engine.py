@@ -37,7 +37,7 @@ from ..db import (
 )
 from ..platforms.base import PublishError
 from ..platforms.registry import publish_post
-from .planner import fill_slot, plan_slots
+from .planner import fill_slot, plan_slots, tz
 
 log = logging.getLogger("adforge.sched")
 
@@ -69,7 +69,12 @@ def plan_ahead(rng: random.Random | None = None) -> int:
                           sched.brand, sched.platform)
                 continue
 
-            for day in (now.date(), now.date() + dt.timedelta(days=1)):
+            # Enumerate LOCAL calendar days. plan_slots builds its times in
+            # the configured zone, so feeding it a UTC date skipped the
+            # current evening's slots whenever UTC had already rolled over -
+            # from 20:00 onward in America/New_York.
+            today_local = now.astimezone(tz()).date()
+            for day in (today_local, today_local + dt.timedelta(days=1)):
                 for when in plan_slots(sched, day, rng):
                     if not (now < when <= horizon):
                         continue
@@ -125,10 +130,42 @@ def _published_today(session, sched: Schedule) -> int:
     )
 
 
+# A claim older than this is assumed dead: the process was killed, the pool was
+# shut down mid-send, or the adapter hung. Comfortably longer than the slowest
+# adapter's rate-limit floor (Reddit, 1800s) plus its upload time.
+STALE_CLAIM_SECONDS = 3600
+
+
+def reap_stale_claims() -> int:
+    """Return posts stuck in PUBLISHING to APPROVED so they can be retried.
+
+    `claim_post` commits PUBLISHING before the network call, which is what
+    stops a double send - but nothing moved a post back out if the worker died
+    in between. Those posts became invisible to every later tick: never
+    published, never marked failed, and showing a status the UI could not act
+    on. `attempts` was already incremented, so the retry cap still bounds this.
+    """
+    cutoff = utcnow() - dt.timedelta(seconds=STALE_CLAIM_SECONDS)
+    with session_scope() as session:
+        stale = (
+            session.query(Post)
+            .filter(Post.status == PostStatus.PUBLISHING)
+            .filter(Post.updated_at <= cutoff)
+            .all()
+        )
+        for post in stale:
+            post.status = PostStatus.APPROVED
+            post.error = "publisher died mid-send; requeued"
+            log.warning("reaped stale claim on post %s", post.id)
+        return len(stale)
+
+
 def promote_and_publish() -> tuple[int, int]:
     """Expire review windows, then publish anything due."""
     promoted = published = 0
     now = utcnow()
+
+    reap_stale_claims()
 
     with session_scope() as session:
         # REVIEW -> APPROVED, auto accounts whose window has run out.
@@ -142,35 +179,90 @@ def promote_and_publish() -> tuple[int, int]:
             promoted += 1
             log.info("review window expired, approved post %s", post.id)
 
-        # APPROVED and due -> publish.
-        due = (
-            session.query(Post)
+        # Collect ids only. The publish loop below deliberately runs OUTSIDE
+        # this transaction: adapters sleep for their rate-limit floor (Reddit
+        # is 1800s) and then do network I/O, and holding a write transaction
+        # across that meant a crash mid-run rolled back PUBLISHED state for
+        # posts that were already live, which then republished on the next tick.
+        due_ids = [
+            row[0]
+            for row in session.query(Post.id)
             .filter(Post.status.in_([PostStatus.APPROVED, PostStatus.FAILED]))
             .filter(Post.scheduled_for.isnot(None), Post.scheduled_for <= now)
             .filter(Post.attempts < MAX_PUBLISH_ATTEMPTS)
             .order_by(Post.scheduled_for)
             .all()
-        )
-        for post in due:
-            account = session.get(Account, post.account_id) if post.account_id else None
-            if account is None or not account.enabled:
-                post.error = "no enabled account for this destination"
-                post.status = PostStatus.REJECTED
-                continue
-            try:
-                publish_post(post, account)
-                published += 1
-            except PublishError as e:
-                # publish_post already set status/error. A retryable failure
-                # stays FAILED and is picked up again next tick until the
-                # attempt cap.
-                log.warning("post %s failed: %s", post.id, e)
-            except Exception as e:  # noqa: BLE001
-                post.status = PostStatus.FAILED
-                post.error = str(e)[:900]
-                log.exception("unexpected error publishing post %s", post.id)
+        ]
+
+    for post_id in due_ids:
+        if publish_claimed(post_id):
+            published += 1
 
     return promoted, published
+
+
+def claim_post(post_id: int) -> bool:
+    """Atomically move a due post to PUBLISHING. True if this caller won it.
+
+    A compare-and-set on status, committed before any network call. Two
+    publishers can select the same row - WAL lets both read it - but only one
+    UPDATE matches, so only one transmits.
+    """
+    with session_scope() as session:
+        rows = (
+            session.query(Post)
+            .filter(
+                Post.id == post_id,
+                Post.status.in_([PostStatus.APPROVED, PostStatus.FAILED]),
+                Post.attempts < MAX_PUBLISH_ATTEMPTS,
+            )
+            .update(
+                {Post.status: PostStatus.PUBLISHING,
+                 Post.attempts: Post.attempts + 1},
+                synchronize_session=False,
+            )
+        )
+        return rows == 1
+
+
+def publish_claimed(post_id: int) -> bool:
+    """Claim, publish, then record the outcome. Returns True if it went out."""
+    if not claim_post(post_id):
+        log.debug("post %s already claimed by another publisher", post_id)
+        return False
+
+    with session_scope() as session:
+        post = session.get(Post, post_id)
+        account = session.get(Account, post.account_id) if post.account_id else None
+        if account is None or not account.enabled:
+            post.error = "no enabled account for this destination"
+            post.status = PostStatus.REJECTED
+            return False
+
+        # A retryable failure must return to APPROVED, not stay PUBLISHING, or
+        # the claim would permanently strand it.
+        try:
+            result = publish_post(post, account)
+        except PublishError as e:
+            if post.status == PostStatus.PUBLISHING:
+                post.status = (
+                    PostStatus.APPROVED if e.retryable else PostStatus.REJECTED
+                )
+            log.warning("post %s failed: %s", post_id, e)
+            return False
+        except Exception as e:  # noqa: BLE001
+            post.status = PostStatus.APPROVED
+            post.error = str(e)[:900]
+            log.exception("unexpected error publishing post %s", post_id)
+            return False
+
+        if result.dry_run:
+            # Dry runs used to leave the post APPROVED and past-due, so it was
+            # re-selected every minute until it burned the retry cap - and any
+            # backlog transmitted in one burst the moment the user went live.
+            post.status = PostStatus.REJECTED
+            post.error = "dry run - not transmitted"
+        return not result.dry_run
 
 
 def run_radar() -> int:

@@ -47,13 +47,29 @@ class RedditAdapter(BaseAdapter):
 
     def validate(self, creds: dict, options: dict) -> list[str]:
         problems = super().validate(creds, options)
-        if not options.get("subreddit"):
+        sub = str(options.get("subreddit") or "").strip()
+        if not sub:
             problems.append("no subreddit specified")
-        if not options.get("allowed"):
-            problems.append(
-                f"subreddit r/{options.get('subreddit', '?')} is not allowlisted - "
-                "confirm its self-promotion rules and enable it in the UI first"
-            )
+            return problems
+
+        # The confirmation is bound to the subreddit name it was granted for.
+        # A bare boolean carried over when the field was retyped: vet
+        # r/LocalLLaMA, later change the name to r/MachineLearning, and the
+        # "I have read the rules" tick silently applied to a community nobody
+        # had checked. Given the stated downside is a sitewide domain ban, the
+        # grant has to be specific.
+        granted = str(options.get("allowed_for") or "").strip()
+        if not options.get("allowed") or granted.lower() != sub.lower():
+            if granted and granted.lower() != sub.lower():
+                problems.append(
+                    f"the rules confirmation was given for r/{granted}, not "
+                    f"r/{sub} - re-confirm it for this subreddit in the UI"
+                )
+            else:
+                problems.append(
+                    f"subreddit r/{sub} is not allowlisted - confirm its "
+                    "self-promotion rules and enable it in the UI first"
+                )
         return problems
 
     def publish(self, payload: Payload, creds: dict, dry_run: bool) -> Result:
@@ -201,7 +217,13 @@ class TikTokAdapter(BaseAdapter):
             raise PublishError(f"tiktok token refresh failed: {r.text[:300]}")
         data = r.json()
         if "access_token" not in data:
-            raise PublishError(f"tiktok token response missing token: {data}")
+            # Never interpolate `data` - a partial-scope or drifted response
+            # carries the refresh_token, and this error is persisted to the DB,
+            # written to the log, and rendered on the post page.
+            raise PublishError(
+                "tiktok token response contained no access_token "
+                f"(keys: {sorted(data)})"
+            )
         return data["access_token"]
 
     def publish(self, payload: Payload, creds: dict, dry_run: bool) -> Result:

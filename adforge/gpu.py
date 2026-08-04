@@ -115,15 +115,19 @@ def gpu(mode: str, settle: float = 3.0):
         return
 
     _LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
-    fh = os.open(_LOCK_FILE, os.O_RDWR | os.O_CREAT, 0o644)
-    t0 = time.time()
-    fcntl.flock(fh, fcntl.LOCK_EX)
-    waited = time.time() - t0
-    if waited > 1:
-        log.info("waited %.1fs for the GPU lock", waited)
-
-    _local.mode = mode
+    fh = os.open(_LOCK_FILE, os.O_RDWR | os.O_CREAT, 0o600)
+    # Everything after the open lives in the try. Previously the flock and the
+    # bookkeeping between it and the try were unprotected, so an exception
+    # there leaked the descriptor - and os.open fds are not closed by GC, so
+    # the flock was held for the life of the process. Every later gpu() call,
+    # in this process and in a `--worker` one, would block on it forever.
     try:
+        t0 = time.time()
+        fcntl.flock(fh, fcntl.LOCK_EX)
+        waited = time.time() - t0
+        if waited > 1:
+            log.info("waited %.1fs for the GPU lock", waited)
+        _local.mode = mode
         if current_mode() != mode:
             log.info("switching GPU mode %s -> %s", current_mode(), mode)
             if mode == TEXT:

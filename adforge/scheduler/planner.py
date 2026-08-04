@@ -15,6 +15,7 @@ from __future__ import annotations
 import datetime as dt
 import logging
 import random
+import uuid
 import zoneinfo
 
 from ..brands import get_brand
@@ -120,7 +121,21 @@ def fill_slot(
         brand.pillar(rng.choice(keys)) if keys else brand.pick_pillar(rng)
     )
 
+    # Read what we need, then CLOSE the transaction before generating.
+    #
+    # This used to run the writer and the whole media pipeline inside the
+    # caller's open session. The first flush starts a SQLite write
+    # transaction, so a planning run with video held the database locked for
+    # the length of the render - up to comfy_timeout, 30 minutes - and every
+    # other writer (approving a post, saving an account, the radar scan)
+    # blocked for busy_timeout and then returned a 500. WAL also could not
+    # checkpoint for the duration.
     recent = recent_bodies(session, sched.brand, sched.platform)
+    sched_brand, sched_platform = sched.brand, sched.platform
+    attach_media = bool(sched.attach_media)
+    account_id = account.id if account is not None else None
+    session.rollback()  # release the read transaction; nothing is pending yet
+
     draft = write_post(brand, ps, pillar, recent=recent, rng=rng)
 
     mode = account.mode if account is not None else PostMode.AUTO
@@ -162,16 +177,20 @@ def fill_slot(
     if ps.key in ("reddit", "youtube"):
         post.title = _headline(brand, draft.text, ps)
 
-    session.add(post)
-    session.flush()
-
-    if sched.attach_media:
+    # Media is generated BEFORE the insert, for the same reason: rendering a
+    # video with the row already flushed would hold the write lock for the
+    # whole render. The asset slug therefore cannot use post.id, which does not
+    # exist yet - a random suffix serves the same purpose.
+    if attach_media:
+        slug = f"{sched_brand}_{sched_platform}_{uuid.uuid4().hex[:10]}"
         try:
-            _attach_media(brand, post, ps, draft, rng)
+            _attach_media(brand, post, ps, draft, rng, slug)
         except Exception as e:  # noqa: BLE001 - a missing image must not lose the copy
-            log.warning("media generation failed for post %s: %s", post.id, e)
+            log.warning("media generation failed for %s: %s", slug, e)
             post.critic_notes = f"media failed: {str(e)[:200]}; {post.critic_notes}"
 
+    session.add(post)
+    session.flush()
     return post
 
 
@@ -183,10 +202,8 @@ def _headline(brand, body: str, ps) -> str:
     return first[:limit]
 
 
-def _attach_media(brand, post: Post, ps, draft, rng) -> None:
+def _attach_media(brand, post: Post, ps, draft, rng, slug: str) -> None:
     from ..media.images import generate_image
-
-    slug = f"{post.brand}_{post.platform}_{post.id}"
 
     if ps.key in VIDEO_FIRST and settings.enable_video and ps.video_size:
         from ..media.script import caption_for, write_script

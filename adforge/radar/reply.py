@@ -162,7 +162,15 @@ def send_reply(draft: ReplyDraft, thread: RadarThread, account, dry_run: bool) -
     The disclosure is appended here, after any human edits, so a reply can
     never go out without it.
     """
-    body = policy.ensure_disclosure(draft.body, draft.brand)
+    # Append the exact stored disclosure unless that exact string is already
+    # present. `ensure_disclosure` uses a heuristic that ordinary phrasing
+    # satisfies - "I built a benchmark harness for this last year" matches
+    # `i built` - so a reply could go out with no disclosure at all while the
+    # UI promised one was attached. A substring check cannot be fooled that way.
+    body = draft.body.rstrip()
+    disclosure = draft.disclosure or policy.disclosure_for(draft.brand)
+    if disclosure not in body:
+        body = f"{body}\n\n{disclosure}"
 
     if dry_run:
         log.info(

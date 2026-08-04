@@ -454,7 +454,16 @@ class DiscordAdapter(BaseAdapter):
     min_interval_seconds = 15
 
     def validate(self, creds: dict, options: dict) -> list[str]:
-        if creds.get("webhook_url"):
+        if url := creds.get("webhook_url"):
+            # The webhook URL is the entire destination and is dialled
+            # verbatim, so an arbitrary value turns this adapter into an
+            # HTTP POST primitive against anything the host can reach -
+            # including loopback services and cloud metadata endpoints.
+            if not str(url).startswith("https://discord.com/api/webhooks/"):
+                return [
+                    "webhook_url must start with "
+                    "https://discord.com/api/webhooks/"
+                ]
             return []
         if creds.get("bot_token") and creds.get("channel_id"):
             return []

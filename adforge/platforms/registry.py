@@ -84,7 +84,9 @@ def publish_post(post: Post, account: Account | None) -> Result:
             f"{ps.max_chars} - edit it before publishing"
         )
 
-    post.attempts = (post.attempts or 0) + 1
+    # `attempts` is incremented by the claim in scheduler.engine.claim_post,
+    # which is what makes the retry cap meaningful across processes. Doing it
+    # again here would double-count and halve the effective cap.
     try:
         creds = account.creds() if account else {}
         result = adapter.publish(payload, creds, dry)

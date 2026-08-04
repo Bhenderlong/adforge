@@ -15,9 +15,11 @@ from __future__ import annotations
 import datetime as dt
 import json
 import logging
+import re
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
@@ -51,8 +53,60 @@ from ..scheduler.planner import plan_slots, tz
 
 log = logging.getLogger("adforge.ui")
 
+# Hosts this app answers state-changing requests on. Anything else is either a
+# DNS-rebinding attempt or a misconfigured proxy; both should fail loudly.
+_ALLOWED_HOSTS = {
+    "localhost", "127.0.0.1", "::1", "[::1]",
+    settings.host, *(h.strip() for h in settings.extra_hosts.split(",") if h.strip()),
+}
+
 HERE = Path(__file__).resolve().parent
 app = FastAPI(title="AdForge")
+
+
+@app.middleware("http")
+async def _same_origin_only(request: Request, call_next):
+    """Reject cross-origin state changes and unexpected Host headers.
+
+    Binding to 127.0.0.1 does NOT make this safe on its own: any page the
+    operator's browser loads can POST here cross-origin. An HTML form POST is a
+    "simple request", so there is no preflight and CORS never gets a say on the
+    send. Without this an ad or iframe on an unrelated site could enable an
+    account, point the Discord webhook at an attacker, switch that account's
+    dry-run off, and trigger publish_now - all silently.
+
+    Checking Host as well closes DNS rebinding, where an attacker-controlled
+    name resolves to 127.0.0.1 and makes their page same-origin with this app.
+    """
+    if request.method in ("POST", "PUT", "PATCH", "DELETE"):
+        host = (request.headers.get("host") or "").split(":")[0]
+        if host not in _ALLOWED_HOSTS:
+            log.warning("rejected %s %s: unexpected Host %r",
+                        request.method, request.url.path, host)
+            return JSONResponse({"detail": "unexpected Host header"}, status_code=421)
+
+        origin = request.headers.get("origin")
+        referer = request.headers.get("referer")
+        source = origin or referer
+        if source is None:
+            # curl and the test-suite send neither. A browser always sends at
+            # least a Referer for a form POST, so this only admits non-browser
+            # clients, which are not the CSRF threat.
+            pass
+        else:
+            try:
+                src_host = urlparse(source).hostname or ""
+            except ValueError:
+                src_host = ""
+            if src_host not in _ALLOWED_HOSTS:
+                log.warning("rejected cross-origin %s %s from %r",
+                            request.method, request.url.path, source)
+                return JSONResponse(
+                    {"detail": "cross-origin request refused"}, status_code=403
+                )
+    return await call_next(request)
+
+
 app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
 templates = Jinja2Templates(directory=HERE / "templates")
 
@@ -64,14 +118,43 @@ JOBS_LOCK = threading.Lock()
 _scheduler = None
 
 
+MAX_TRACKED_JOBS = 200
+
+
+def _jobs_snapshot(limit: int) -> list[dict]:
+    """Copies of the most recent job records, taken under the lock.
+
+    Both parts matter. Reading JOBS without the lock races `_job` inserting
+    from another thread ("dictionary changed size during iteration" -> a 500 on
+    the dashboard). And handing out references to the live inner dicts let a
+    poll serialize one while a worker was mutating it, producing torn records
+    like state="running" alongside a "finished" timestamp.
+    """
+    with JOBS_LOCK:
+        return [dict(j) for j in list(JOBS.values())[-limit:]]
+
+
 def _job(name: str, fn, *args, **kw) -> str:
     """Run fn in the pool, tracking its state for the UI."""
-    jid = f"{name}-{int(utcnow().timestamp() * 1000)}"
     with JOBS_LOCK:
-        JOBS[jid] = {"id": jid, "name": name, "state": "running",
+        # Millisecond ids collided for two same-named jobs in the same tick,
+        # and the second silently overwrote the first.
+        jid = f"{name}-{len(JOBS)}-{int(utcnow().timestamp() * 1000)}"
+        JOBS[jid] = {"id": jid, "name": name, "state": "queued",
                      "started": utcnow().isoformat(), "detail": ""}
+        # Bounded: only the last handful is ever displayed, so anything older
+        # was pure retained garbage in a process meant to run for weeks.
+        while len(JOBS) > MAX_TRACKED_JOBS:
+            for old_id, rec in list(JOBS.items()):
+                if rec["state"] != "running":
+                    JOBS.pop(old_id, None)
+                    break
+            else:
+                break
 
     def wrapper():
+        with JOBS_LOCK:
+            JOBS[jid]["state"] = "running"
         try:
             result = fn(*args, **kw)
             with JOBS_LOCK:
@@ -87,6 +170,22 @@ def _job(name: str, fn, *args, **kw) -> str:
     return jid
 
 
+_ENV_UNSAFE = re.compile(r"[\r\n\x00]")
+
+
+def _env_safe(value: str) -> str:
+    """Strip anything that could forge an extra line in the .env file.
+
+    The file is written one `KEY=value` per line and re-read by
+    pydantic-settings, so a newline inside a value injects a whole new setting.
+    Values are emitted in sorted order and the last definition wins, which made
+    any free-text field sorting after ADFORGE_DRY_RUN - the timezone, the host,
+    the model fallback list - able to smuggle in `ADFORGE_DRY_RUN=false` and
+    silently defeat the typed GO LIVE confirmation below.
+    """
+    return _ENV_UNSAFE.sub(" ", value).strip()
+
+
 def _flash(request: Request, msg: str, kind: str = "ok") -> None:
     request.session_flash = (kind, msg)  # type: ignore[attr-defined]
 
@@ -96,8 +195,11 @@ def _startup() -> None:
     global _scheduler
     init_db()
     _seed_defaults()
-    _scheduler = build_scheduler()
-    _scheduler.start()
+    if settings.ui_runs_scheduler:
+        _scheduler = build_scheduler()
+        _scheduler.start()
+    else:
+        log.info("scheduler disabled in this process (expecting run.py --worker)")
     log.info("adforge ui up on %s:%s", settings.host, settings.port)
 
 
@@ -141,6 +243,9 @@ def ctx(request: Request, **kw) -> dict:
         "platforms": SPECS,
         "settings": settings,
         "now": utcnow(),
+        # Templates render stored (naive UTC) timestamps in local time.
+        "tz": tz(),
+        "utc": dt.timezone.utc,
     }
     base.update(kw)
     return base
@@ -196,7 +301,7 @@ def dashboard(request: Request):
         ctx(request, counts=counts, upcoming=upcoming, recent=recent, hot=hot,
             live=live, llm_ok=ok_llm, llm_msg=msg_llm,
             comfy_ok=comfy.is_up(), vram=gpumod.vram(),
-            gpu_mode=gpumod.current_mode(), jobs=list(JOBS.values())[-8:]),
+            gpu_mode=gpumod.current_mode(), jobs=_jobs_snapshot(8)),
     )
 
 
@@ -206,8 +311,7 @@ def api_status():
     ok_llm, msg_llm = llm_health()
     with session_scope() as s:
         counts = _status_counts(s)
-    with JOBS_LOCK:
-        jobs = list(JOBS.values())[-8:]
+    jobs = _jobs_snapshot(8)
     return JSONResponse({
         "llm": {"ok": ok_llm, "detail": msg_llm},
         "comfy": comfy.is_up(),
@@ -285,6 +389,11 @@ def post_edit(
         post.link = link
         if scheduled_for:
             try:
+                # The form renders local time (see post_detail.html), so parse
+                # it back as local. Previously the template displayed the raw
+                # stored value - naive UTC - while this parsed it as local, so
+                # saving a post without touching the field moved it by the UTC
+                # offset. Three edits pushed a post most of a day.
                 local = dt.datetime.fromisoformat(scheduled_for).replace(tzinfo=tz())
                 post.scheduled_for = local.astimezone(dt.timezone.utc)
             except ValueError:
@@ -311,7 +420,18 @@ def post_action(post_id: int, action: str = Form(...)):
             post.mode = PostMode.MANUAL
             post.review_until = None
         elif action == "publish_now":
+            # `Account.enabled` is the master off-switch and every other send
+            # path honours it. This one fetched the account and then never
+            # looked at it, so a post could be transmitted from a destination
+            # the user had deliberately switched off - while the panel still
+            # displayed "live".
             account = s.get(Account, post.account_id) if post.account_id else None
+            if account is None or not account.enabled:
+                raise HTTPException(
+                    400,
+                    "this post has no enabled account - enable the destination "
+                    "on the Accounts page first",
+                )
             post.status = PostStatus.APPROVED
             post.scheduled_for = utcnow()
             post.attempts = 0
@@ -329,11 +449,24 @@ def post_action(post_id: int, action: str = Form(...)):
 
 
 def _publish_one(post_id: int) -> str:
+    """Publish one post through the same claim the scheduler uses.
+
+    Going straight to publish_post here raced the timed tick: for the up to a
+    minute this job takes, the scheduler saw an APPROVED, due, attempts=0 post
+    and sent it as well. The claim makes whichever one gets there first the
+    only one that transmits. It also re-checks `enabled`, since the account can
+    be switched off between the click and the send.
+    """
+    from ..scheduler.engine import publish_claimed
+
+    sent = publish_claimed(post_id)
     with session_scope() as s:
         post = s.get(Post, post_id)
-        account = s.get(Account, post.account_id) if post.account_id else None
-        result = publish_post(post, account)
-        return result.url or result.detail
+        if post is None:
+            return "post deleted"
+        if sent:
+            return post.remote_url or "published"
+        return post.error or f"not sent ({post.status.value})"
 
 
 def _regenerate(post_id: int) -> str:
@@ -342,6 +475,8 @@ def _regenerate(post_id: int) -> str:
 
     with session_scope() as s:
         post = s.get(Post, post_id)
+        if post is None:
+            return "post deleted while the job was running"
         brand = get_brand(post.brand)
         ps = spec(post.platform)
         pillar = brand.pillar(post.pillar) if post.pillar else brand.pick_pillar()
@@ -355,7 +490,25 @@ def _regenerate(post_id: int) -> str:
         post.generation_meta = json.dumps(
             {"angle": draft.angle, "attempts": draft.attempts}
         )
-        return f"score {draft.score:.1f}"
+
+        # Mirror fill_slot's gating. Without this a rewrite inherited the
+        # original post's review_until - normally already in the past, since
+        # posts are planned up to 26h ahead - so freshly rewritten copy was
+        # promoted on the very next 60-second tick with no review window at
+        # all. Worse, a rewrite that scored BELOW the bar stayed AUTO and
+        # auto-published, which is exactly what the quality gate exists to
+        # prevent.
+        if not draft.passed:
+            post.mode = PostMode.MANUAL
+            post.review_until = None
+            post.critic_notes = (
+                f"below quality bar (score {draft.score:.1f}); {post.critic_notes}"
+            )[:2000]
+        elif post.mode == PostMode.AUTO:
+            post.review_until = utcnow() + dt.timedelta(
+                minutes=max(0, settings.review_window_minutes)
+            )
+        return f"score {draft.score:.1f}{'' if draft.passed else ' (below bar, held for review)'}"
 
 
 def _regen_media(post_id: int) -> str:
@@ -364,6 +517,8 @@ def _regen_media(post_id: int) -> str:
 
     with session_scope() as s:
         post = s.get(Post, post_id)
+        if post is None:
+            return "post deleted while the job was running"
         brand = get_brand(post.brand)
         ps = spec(post.platform)
         prompt = post.media_prompt or media_prompt(brand, post.body, post.pillar)
@@ -379,7 +534,9 @@ def _regen_media(post_id: int) -> str:
 def asset(name: str):
     """Serve a generated asset. Path-traversal safe."""
     target = (ASSETS / name).resolve()
-    if not str(target).startswith(str(ASSETS.resolve())) or not target.exists():
+    # is_relative_to, not startswith: a prefix match with no separator also
+    # accepts a sibling directory such as data/assets_backup/.
+    if not target.is_relative_to(ASSETS.resolve()) or not target.exists():
         raise HTTPException(404, "no such asset")
     return FileResponse(target)
 
@@ -592,6 +749,13 @@ async def account_save(request: Request, account_id: int):
                 opts[flag] = bool(form.get(f"optflag_{flag}"))
             elif f"optflag_{flag}_present" in form:
                 opts[flag] = False
+
+        # Bind the Reddit rules confirmation to the subreddit it was given for,
+        # so retyping the name does not silently carry the tick over to a
+        # community nobody vetted. The adapter compares the two.
+        if acct.platform == "reddit":
+            opts["allowed_for"] = str(opts.get("subreddit", "")) if opts.get("allowed") else ""
+
         acct.options = json.dumps(opts)
     return RedirectResponse("/accounts", status_code=303)
 
@@ -782,7 +946,12 @@ def _send_reply_job(draft_id: int) -> str:
 
     with session_scope() as s:
         draft = s.get(ReplyDraft, draft_id)
+        if draft is None:
+            return "draft deleted while the job was running"
         thread = s.get(RadarThread, draft.thread_id)
+        if thread is None:
+            draft.error = "thread no longer exists"
+            return draft.error
         account = (
             s.query(Account)
             .filter(Account.brand == draft.brand, Account.platform == thread.source)
@@ -909,7 +1078,7 @@ async def settings_save(request: Request):
         if not key.startswith("set_"):
             continue
         name = f"ADFORGE_{key[4:].upper()}"
-        existing[name] = str(value).strip()
+        existing[name] = _env_safe(str(value))
 
     # Checkboxes are absent from the form when unticked, so each one carries a
     # hidden `bool_<name>_present` companion. The companion marks that the
@@ -952,8 +1121,7 @@ async def settings_save(request: Request):
 
 @app.get("/api/jobs")
 def api_jobs():
-    with JOBS_LOCK:
-        return JSONResponse(list(JOBS.values())[-30:])
+    return JSONResponse(_jobs_snapshot(30))
 
 
 @app.post("/api/jobs/clear")

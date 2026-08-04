@@ -318,12 +318,17 @@ Write one image prompt that visually expresses THIS specific post's idea -
 not a generic brand image. Concrete subject first, then style, then lighting
 and quality descriptors."""
     try:
-        raw, _ = chat_with_fallback(
-            [{"role": "system", "content": sys}, {"role": "user", "content": user}],
-            settings.fast_chain,
-            temperature=0.9,
-            max_tokens=220,
-        )
+        # Every other inference site takes the lock; this one did not, so it
+        # could load the writer onto GPUs that already held an SDXL checkpoint
+        # and trigger the cudaMalloc OOM the arbitration exists to prevent.
+        with gpu(TEXT):
+            raw, _ = chat_with_fallback(
+                [{"role": "system", "content": sys},
+                 {"role": "user", "content": user}],
+                settings.fast_chain,
+                temperature=0.9,
+                max_tokens=220,
+            )
         p = _clean(raw)
         p = p.replace("\n", ", ").strip(" ,")
         if len(p) > 20:

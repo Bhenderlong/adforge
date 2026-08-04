@@ -52,6 +52,11 @@ class PostStatus(str, enum.Enum):
     DRAFT = "DRAFT"
     REVIEW = "REVIEW"
     APPROVED = "APPROVED"
+    # Claimed by a publisher and committed before the network call. Nothing
+    # else will pick the post up while it is in this state, which is what
+    # stops two publishers - the UI's scheduler and a `--worker` process, or a
+    # manual tick racing the timed one - from transmitting the same post twice.
+    PUBLISHING = "PUBLISHING"
     PUBLISHED = "PUBLISHED"
     REJECTED = "REJECTED"
     FAILED = "FAILED"
@@ -84,8 +89,10 @@ class Account(Base):
     # Per-account override of the global dry_run. None = inherit global.
     dry_run = Column(Boolean, nullable=True)
     mode = Column(Enum(PostMode), default=PostMode.AUTO)
-    # Credentials are stored here rather than in .env so the UI can manage
-    # several accounts per platform. File is chmod 600 by run.sh.
+    # Plaintext JSON: OAuth tokens, refresh tokens, and the Reddit account
+    # password. Stored here rather than in .env so the UI can manage several
+    # accounts per platform. `_restrict_db_permissions()` chmods this file (and
+    # its -wal/-shm sidecars) to 0600 on every init_db; `data/` itself is 0700.
     credentials = Column(Text, default="{}")
     # Platform-specific config: subreddit allowlist, discord channel ids, etc.
     options = Column(Text, default="{}")

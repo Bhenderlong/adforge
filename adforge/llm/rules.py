@@ -168,7 +168,8 @@ def _cited_number(match: str, brand: Brand) -> bool:
 UNVERIFIABLE = [
     (r"(?i)\b(?:trusted|used) by (?:\d[\d,]*\+?|thousands|hundreds|millions|top)\b", "social_proof"),
     (r"(?i)\b\d[\d,]*\+?\s+(?:happy\s+)?(?:customers|users|teams|developers|companies)\b", "user_counts"),
-    (r"(?i)\b(?:#1|number one|the leading|market[- ]leading|best[- ]in[- ]class)\b", "superlative_claim"),
+    (r"(?i)(?:#1|\bnumber one\b|\bthe leading\b|\bmarket[- ]leading\b|"
+     r"\bbest[- ]in[- ]class\b)", "superlative_claim"),
     (r"(?i)\b(?:\d+x|\d+%)\s+(?:faster|cheaper|better)\s+than\s+\w+", "unbenchmarked_comparison"),
     (r"(?i)\bbacked by\b[^.!?]{0,30}\b(?:vc|investors|ycombinator|y combinator)\b", "funding_claim"),
 ]
@@ -215,7 +216,8 @@ def check(text: str, brand: Brand, ps: PlatformSpec) -> list[Violation]:
         ),
         (r"(?i)\b(?:as an ai|language model|i cannot|i'?m unable to)\b", "assistant_voice"),
         (r"(?i)^\s*(?:sure[,!]|certainly[,!]|absolutely[,!])", "assistant_voice"),
-        (r"\[(?:insert|your|company|product|link|url|name)[^\]]*\]", "unfilled_placeholder"),
+        (r"(?i)\[(?:insert|your|company|product|link|url|name)[^\]]*\]",
+         "unfilled_placeholder"),
         (r"\{\{?\s*\w+\s*\}?\}", "unfilled_placeholder"),
         (r"(?i)\b(?:option|version|draft)\s*[12]\s*:", "multiple_drafts"),
         (r"(?i)^\s*(?:caption|post|tweet|copy)\s*:", "labelled_output"),

@@ -140,6 +140,16 @@ class Settings(BaseSettings):
     # ---- server ------------------------------------------------------------
     host: str = "127.0.0.1"
     port: int = 8770
+    # The UI process runs the scheduler by default. Set false when running a
+    # separate `run.py --worker`, otherwise both processes tick and both try to
+    # publish the same posts (the claim stops a duplicate send, but the second
+    # scheduler is still wasted work and confusing in the logs).
+    ui_runs_scheduler: bool = True
+    # Extra hostnames the UI will accept state-changing requests on, comma
+    # separated. Only needed behind a reverse proxy; localhost is always
+    # allowed. Anything not listed is refused, which is what closes DNS
+    # rebinding.
+    extra_hosts: str = ""
     db_url: str = f"sqlite:///{DATA / 'adforge.db'}"
     timezone: str = "America/New_York"
 
@@ -155,5 +165,12 @@ class Settings(BaseSettings):
 
 settings = Settings()
 
+# Owner-only. `data/` holds the credential database and the logs, and the
+# default umask on a normal account (022, or 002 here) would otherwise leave
+# both group- and world-readable.
 for _d in (DATA, ASSETS, DATA / "logs"):
     _d.mkdir(parents=True, exist_ok=True)
+    try:
+        _d.chmod(0o700)
+    except OSError:  # noqa: S110 - a read-only mount is not worth dying over
+        pass
