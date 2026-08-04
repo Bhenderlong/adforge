@@ -222,6 +222,10 @@
 
       <div class="row" style="margin-top:16px">
         <button class="primary" type="submit">Save account</button>
+        <button type="button" class="sm" onclick="testAccount({{ acct.id }}, this)">
+          Test connection
+        </button>
+        <span class="faint" id="test-{{ acct.id }}"></span>
         {% if not ready %}
           <span class="faint">{{ detail }}</span>
         {% endif %}
@@ -230,4 +234,24 @@
   </div>
 </details>
 {% endfor %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Read-only identity check against the real platform. Save first - it reads
+// what is stored, not what is typed.
+async function testAccount(id, btn) {
+  const out = document.getElementById('test-' + id);
+  btn.disabled = true; out.textContent = 'checking...'; out.className = 'faint';
+  try {
+    const r = await fetch('/accounts/' + id + '/test', {method: 'POST'});
+    const d = await r.json();
+    out.textContent = d.detail;
+    out.className = d.ok ? 'pill live' : 'pill bad';
+  } catch (e) {
+    out.textContent = 'request failed: ' + e; out.className = 'pill bad';
+  }
+  btn.disabled = false;
+}
+</script>
 {% endblock %}

@@ -824,27 +824,30 @@ def account_clear_credential(account_id: int, name: str = Form(...)):
 
 @app.post("/accounts/{account_id}/test")
 def account_test(account_id: int):
-    """Dry-run a throwaway post to prove the payload builds."""
+    """Ask the platform whether these credentials actually work.
+
+    Field-presence checking answers the wrong question. This performs a
+    READ-ONLY identity call per platform - nothing here can post - and reports
+    the authenticated identity, which also catches valid credentials pointing
+    at the wrong account.
+    """
+    from ..platforms.verify import verify
+
     with session_scope() as s:
         acct = s.get(Account, account_id)
         if not acct:
             raise HTTPException(404, "no such account")
-        brand = get_brand(acct.brand)
-        ps = spec(acct.platform)
-        probe = Post(
-            brand=acct.brand, platform=acct.platform, account_id=acct.id,
-            title="AdForge connection test",
-            body=f"Connection test for {brand.name}. This is a dry run and is "
-                 f"not transmitted to {ps.label}.",
-            link=brand.url,
-        )
-        try:
-            adapter = ADAPTERS[acct.platform]
-            problems = adapter.validate(acct.creds(), acct.opts())
-            detail = "; ".join(problems) if problems else "credentials present"
-        except Exception as e:  # noqa: BLE001
-            detail = f"{type(e).__name__}: {e}"
-    return JSONResponse({"account": account_id, "detail": detail})
+        platform, creds, opts = acct.platform, acct.creds(), acct.opts()
+
+    missing = ADAPTERS[platform].validate(creds, opts)
+    if missing:
+        return JSONResponse({"account": account_id, "ok": False,
+                             "detail": "; ".join(missing)})
+    try:
+        ok, detail = verify(platform, creds, opts)
+    except Exception as e:  # noqa: BLE001 - never 500 a diagnostic button
+        ok, detail = False, f"{type(e).__name__}: {e}"[:200]
+    return JSONResponse({"account": account_id, "ok": ok, "detail": detail})
 
 
 # ---------------------------------------------------------------------------
