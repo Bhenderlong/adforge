@@ -977,6 +977,16 @@ def radar_target_new(
             "'*' for every Discord channel your bot can read, or name one "
             "subreddit (without the r/) or one guild_id/channel_id.",
         )
+    # "I have read this community's rules" cannot be true of every community.
+    # scan.py already forces links off for sitewide hits, but storing the flag
+    # as True records a promise nobody could have made and would quietly become
+    # load-bearing if that scan logic ever changed.
+    from ..radar.scan import is_sitewide
+
+    if is_sitewide(cleaned) and promo_allowed:
+        promo_allowed = ""
+        log.info("sitewide target %r: ignoring the rules-read tick", cleaned)
+
     with session_scope() as s:
         s.add(RadarTarget(
             brand=brand, source=source, target=cleaned,
