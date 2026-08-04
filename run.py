@@ -115,6 +115,13 @@ def check() -> int:
 def main() -> int:
     ap = argparse.ArgumentParser(description="AdForge")
     ap.add_argument("--check", action="store_true", help="preflight and exit")
+    ap.add_argument("--auth", metavar="PLATFORM",
+                    help="run a one-time OAuth flow (youtube) and print the "
+                         "credentials to paste into Accounts")
+    ap.add_argument("--client-id", default="", help="OAuth client id for --auth")
+    ap.add_argument("--client-secret", default="", help="OAuth client secret for --auth")
+    ap.add_argument("--secrets-file", default="",
+                    help="path to the client_secret JSON downloaded from Google")
     ap.add_argument("--worker", action="store_true", help="scheduler only, no UI")
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args()
@@ -123,6 +130,27 @@ def main() -> int:
 
     if args.check:
         return check()
+
+    if args.auth:
+        from adforge.platforms.oauth_helper import (SETUP_STEPS, print_result,
+                                                    youtube_auth)
+
+        if args.auth.lower() != "youtube":
+            print(f"no OAuth helper for {args.auth!r}. Supported: youtube")
+            print("\nThe others take credentials you can copy directly:\n"
+                  "  reddit    old.reddit.com/prefs/apps -> create app -> script\n"
+                  "  x         developer.x.com -> your app -> Keys and tokens\n"
+                  "  linkedin  linkedin.com/developers -> your app -> Auth\n"
+                  "  meta      developers.facebook.com -> your app -> Graph API Explorer\n"
+                  "  discord   a channel webhook URL, or a bot token\n"
+                  "  slack     api.slack.com/apps -> OAuth & Permissions")
+            return 1
+        if not (args.client_id or args.secrets_file):
+            print(SETUP_STEPS)
+            return 1
+        creds = youtube_auth(args.client_id, args.client_secret, args.secrets_file)
+        print_result("YouTube", creds)
+        return 0
 
     if args.worker:
         import time

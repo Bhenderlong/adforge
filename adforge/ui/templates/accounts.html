@@ -180,6 +180,18 @@
       {% endif %}
 
       {% if acct.platform == 'youtube' %}
+        <div class="note warn" style="margin-top:12px">
+          <p><strong>There is no page that shows a refresh token.</strong>
+             YouTube Studio's Channel ID and User ID are not credentials. The
+             refresh token only exists as the result of authorising once:</p>
+          <p class="mono" style="margin:8px 0">./venv/bin/python run.py --auth youtube</p>
+          <p>Run it with no arguments first and it prints the Google Cloud
+             setup steps — you need a project, the YouTube Data API v3 enabled,
+             and a <strong>Desktop app</strong> OAuth client (not "Web"). Then
+             re-run it with <code class="mono">--client-id</code> and
+             <code class="mono">--client-secret</code>, approve in the browser,
+             and paste the three values it prints above.</p>
+        </div>
         <div class="field" style="margin-top:12px">
           <label>Privacy</label>
           <select name="opt_privacy">
