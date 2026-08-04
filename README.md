@@ -86,6 +86,27 @@ published. The gate is code, not prompting, because some of it is a legal matter
 
 Anything that fails the bar is routed to a human regardless of the account mode.
 
+### What the gates cannot do
+
+They catch invented product claims, invented benchmarks, invented control
+numbers, banned phrasing and incoherent structure. They **cannot verify
+arbitrary technical assertions**. A local model will state that an RTX 4090
+hits NVLink bottlenecks; it has no NVLink. The factcheck flags claims it
+believes are wrong, but that is one model's opinion about another's output and
+it is neither complete nor always right.
+
+The practical consequence, worth knowing before you set a review window to 0:
+
+- **Vallorix content is the more reliable of the two.** Its posts are grounded
+  in real control data, so the failure mode is caught rather than plausible.
+- **Inferix engineering content needs you to read it.** The claims are about
+  hardware and inference behaviour, which nothing here can check. Treat it as a
+  strong first draft, not finished copy.
+
+Keep a review window on the Inferix technical pillars. `tips`, `cost` and
+`ai_news` are where a confident wrong statement is most likely and most
+expensive - a technical audience tests what you tell them.
+
 ## Per-platform notes that actually bite
 
 | Platform | What to know |
