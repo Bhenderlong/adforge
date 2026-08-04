@@ -28,6 +28,16 @@ log = logging.getLogger("adforge.radar")
 # reads as trawling.
 MAX_AGE_HOURS = 72
 PREFILTER_LIMIT = 60
+# Sitewide search casts a wider net: it is already keyword-filtered server-side
+# and most results are still scored away.
+SEARCH_LIMIT = 120
+
+# Target values meaning "everything I can reach" rather than one place.
+SITEWIDE = {"all", "*", "sitewide"}
+
+
+def is_sitewide(target: str) -> bool:
+    return target.strip().lower().removeprefix("r/") in SITEWIDE
 
 
 SCORE_SYSTEM = """\
@@ -96,8 +106,34 @@ def _reddit_client(creds: dict):
     )
 
 
+def _search_query(keywords: list[str]) -> str:
+    """Reddit search syntax: quoted phrases OR'd together.
+
+    Quoting matters - an unquoted multi-word keyword is parsed as separate
+    terms and returns their union, which for "gpu cloud" is most of the site.
+    """
+    return " OR ".join(f'"{k}"' if " " in k else k for k in keywords)
+
+
+def _submissions(reddit, target: RadarTarget, keywords: list[str]):
+    """Candidate submissions, sitewide or from one subreddit.
+
+    Sitewide uses Reddit's SEARCH endpoint, not the new-posts firehose.
+    r/all/new is thousands of posts an hour across every subreddit, so a local
+    keyword filter over the newest 60 finds essentially nothing. Search matches
+    server-side across the whole site, which is what scanning all of Reddit
+    actually requires.
+    """
+    if is_sitewide(target.target):
+        return reddit.subreddit("all").search(
+            _search_query(keywords), sort="new", time_filter="week",
+            limit=SEARCH_LIMIT,
+        )
+    return reddit.subreddit(target.target).new(limit=PREFILTER_LIMIT)
+
+
 def scan_reddit(session, target: RadarTarget, creds: dict) -> int:
-    """Scan one subreddit. Returns the number of new threads recorded."""
+    """Scan one subreddit, or the whole site. Returns new threads recorded."""
     from ..brands import get_brand
 
     brand = get_brand(target.brand)
@@ -106,15 +142,18 @@ def scan_reddit(session, target: RadarTarget, creds: dict) -> int:
         log.info("radar target r/%s has no keywords, skipping", target.target)
         return 0
 
+    sitewide = is_sitewide(target.target)
     reddit = _reddit_client(creds)
     cutoff = utcnow() - dt.timedelta(hours=MAX_AGE_HOURS)
     found = 0
 
-    for submission in reddit.subreddit(target.target).new(limit=PREFILTER_LIMIT):
+    for submission in _submissions(reddit, target, keywords):
         created = dt.datetime.fromtimestamp(
             submission.created_utc, tz=dt.timezone.utc
         )
         if created < cutoff:
+            if sitewide:
+                continue  # search results are not strictly time-ordered
             break  # .new() is ordered, so everything after this is older
 
         blob = f"{submission.title}\n{submission.selftext or ''}"
@@ -137,12 +176,27 @@ def scan_reddit(session, target: RadarTarget, creds: dict) -> int:
             # would be an advertisement regardless of how it is phrased.
             relevance = min(relevance, 0.35)
 
+        # The subreddit the thread actually lives in, not the target - for a
+        # sitewide scan those differ, and "r/all" is not somewhere you can post.
+        actual_sub = str(submission.subreddit.display_name)
+
+        # A sitewide hit is in a community whose self-promotion rules nobody has
+        # read. promo_allowed is snapshotted per thread and ANDed with the
+        # target's flag at reply time, so forcing it false here means such a
+        # reply must stand on its own merits with no link until the user
+        # explicitly allowlists that subreddit.
+        promo = bool(target.promo_allowed) and not sitewide
+        note = target.rules_note or ""
+        if sitewide:
+            note = (f"sitewide hit; r/{actual_sub} rules not reviewed - "
+                    "links suppressed")
+
         session.add(
             RadarThread(
                 brand=target.brand,
                 source="reddit",
                 external_id=ext,
-                where=f"r/{target.target}",
+                where=f"r/{actual_sub}",
                 author=str(submission.author) if submission.author else "[deleted]",
                 title=submission.title[:590],
                 excerpt=(submission.selftext or "")[:2000],
@@ -151,8 +205,8 @@ def scan_reddit(session, target: RadarTarget, creds: dict) -> int:
                 relevance=relevance,
                 score_reason=str(verdict.get("reason", ""))[:900],
                 matched_keywords=",".join(hits)[:390],
-                promo_allowed=bool(target.promo_allowed),
-                rules_note=target.rules_note or "",
+                promo_allowed=promo,
+                rules_note=note[:390],
             )
         )
         found += 1
@@ -163,6 +217,49 @@ def scan_reddit(session, target: RadarTarget, creds: dict) -> int:
 # ---------------------------------------------------------------------------
 # Discord
 # ---------------------------------------------------------------------------
+
+
+def discord_channels(bot_token: str) -> list[dict]:
+    """Every readable text channel, across every server this bot is in.
+
+    There is no way to search Discord globally. A bot sees only servers it has
+    been invited to; there is no public directory and no cross-server search
+    endpoint. The only thing that could scan "all of Discord" is a self-bot
+    driving a user account, which Discord's ToS prohibits outright and which
+    gets the account terminated. So a `*` target expands to this instead: what
+    the bot can legitimately reach.
+    """
+    import httpx
+
+    out: list[dict] = []
+    headers = {"Authorization": f"Bot {bot_token}"}
+    with httpx.Client(timeout=60) as client:
+        r = client.get("https://discord.com/api/v10/users/@me/guilds",
+                       headers=headers)
+        if r.status_code >= 400:
+            log.warning("discord guild list failed [%s]: %s",
+                        r.status_code, r.text[:200])
+            return out
+        for guild in r.json():
+            gid, gname = guild["id"], guild.get("name", guild["id"])
+            cr = client.get(
+                f"https://discord.com/api/v10/guilds/{gid}/channels",
+                headers=headers,
+            )
+            if cr.status_code >= 400:
+                log.info("cannot list channels in %s: %s", gname, cr.status_code)
+                continue
+            for ch in cr.json():
+                # 0 text, 5 announcement, 15 forum. Voice and categories have
+                # nothing to read.
+                if ch.get("type") in (0, 5, 15):
+                    out.append({
+                        "guild_id": gid, "guild_name": gname,
+                        "channel_id": ch["id"],
+                        "channel_name": ch.get("name", ""),
+                        "target": f"{gid}/{ch['id']}",
+                    })
+    return out
 
 
 def scan_discord(session, target: RadarTarget, creds: dict) -> int:
@@ -246,8 +343,8 @@ def scan_discord(session, target: RadarTarget, creds: dict) -> int:
                 relevance=relevance,
                 score_reason=str(verdict.get("reason", ""))[:900],
                 matched_keywords=",".join(hits)[:390],
-                promo_allowed=bool(target.promo_allowed),
-                rules_note=target.rules_note or "",
+                promo_allowed=promo,
+                rules_note=note[:390],
             )
         )
         found += 1
@@ -275,7 +372,21 @@ def scan_all() -> int:
                 if target.source == "reddit":
                     total += scan_reddit(session, target, account.creds())
                 elif target.source == "discord":
-                    total += scan_discord(session, target, account.creds())
+                    if is_sitewide(target.target):
+                        # Fan out over every channel the bot can actually read.
+                        chans = discord_channels(account.creds().get("bot_token", ""))
+                        log.info("discord '*' expands to %d channel(s)", len(chans))
+                        for ch in chans:
+                            sub = RadarTarget(
+                                brand=target.brand, source="discord",
+                                target=ch["target"], keywords=target.keywords,
+                                enabled=True, promo_allowed=False,
+                                rules_note=f"{ch['guild_name']} #{ch['channel_name']}",
+                                min_relevance=target.min_relevance,
+                            )
+                            total += scan_discord(session, sub, account.creds())
+                    else:
+                        total += scan_discord(session, target, account.creds())
             except Exception as e:  # noqa: BLE001 - one bad target must not
                 # abort the whole scan
                 log.exception("radar scan of %s failed: %s", target.target, e)

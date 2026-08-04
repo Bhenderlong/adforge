@@ -24,6 +24,21 @@
      genuinely useful replies survive; astroturf gets removed.</p>
 </div>
 
+<div class="note warn">
+  <p><strong>Scanning everything.</strong> On Reddit set the target to
+     <code class="mono">all</code> — that searches the entire site for your
+     keywords through the official search API. Threads found that way are
+     <strong>never given a link</strong>, because they sit in communities whose
+     self-promotion rules you have not read. Add that subreddit as its own
+     target once you have read them.</p>
+  <p><strong>Discord cannot be scanned globally, by anyone.</strong> There is no
+     directory and no cross-server search — a bot only sees servers it has been
+     invited to. Target <code class="mono">*</code> scans every channel your bot
+     can currently read; to widen it, join the server and invite the bot. The
+     only thing that could read all of Discord is a self-bot on a user account,
+     which its ToS forbids and which gets the account terminated.</p>
+</div>
+
 <h2>Targets</h2>
 <div class="grid g2">
   {% for t in targets %}
@@ -90,7 +105,15 @@
         </div>
         <div class="field">
           <label>Target</label>
-          <input type="text" name="target" placeholder="LocalLLaMA — or guild_id/channel_id">
+          <input type="text" name="target" placeholder="all">
+          <div class="hint">
+            <strong>Reddit:</strong> <code class="mono">all</code> searches the
+            whole site for your keywords. Or name one subreddit
+            (<code class="mono">LocalLLaMA</code>, no <code class="mono">r/</code>).<br>
+            <strong>Discord:</strong> <code class="mono">*</code> scans every
+            channel your bot can read. Or one
+            <code class="mono">guild_id/channel_id</code>.
+          </div>
         </div>
         <div class="field">
           <label>Minimum relevance</label>
