@@ -200,6 +200,19 @@ def _attach_media(brand, post: Post, ps, draft, rng) -> None:
         post.hashtags = ",".join(
             __import__("re").findall(r"(?<!\w)#(\w+)", post.body)
         )
+
+        # Surface a degraded render. The Ken Burns fallback looks fine in
+        # isolation, so a broken Wan config would quietly turn every short into
+        # a slideshow. Force a human look rather than shipping that unnoticed.
+        stills = [s for s in script.scenes if not s.animated]
+        if stills:
+            reason = next((s.fallback_reason for s in stills if s.fallback_reason), "")
+            post.mode = PostMode.MANUAL
+            post.critic_notes = (
+                f"NO REAL MOTION in {len(stills)}/{len(script.scenes)} scenes - "
+                f"rendered as stills with a slow zoom ({reason}); "
+                + (post.critic_notes or "")
+            )[:2000]
         return
 
     if ps.supports_image:

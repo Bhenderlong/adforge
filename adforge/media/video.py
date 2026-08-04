@@ -48,6 +48,12 @@ class Scene:
     motion: str = "slow push in, subtle parallax, cinematic"
     still: Path | None = None
     clip: Path | None = None
+    # True when Wan produced real motion, False when the scene fell back to a
+    # Ken Burns move on the still. The fallback looks acceptable, which is
+    # exactly why it must be recorded: a broken Wan config would otherwise
+    # degrade every short to a slideshow with nothing to notice.
+    animated: bool = False
+    fallback_reason: str = ""
 
 
 @dataclass
@@ -272,8 +278,15 @@ def render_scene(
             # A failed clip must not kill the whole video - fall back to the
             # Ken Burns move, which always works from the same still.
             log.warning("wan i2v failed for %s, using still motion: %s", slug, e)
+            scene.fallback_reason = str(e)[:200]
 
+    scene.animated = made
     if not made:
+        if not scene.fallback_reason:
+            scene.fallback_reason = (
+                "video generation disabled" if not settings.enable_video
+                else "wan not attempted"
+            )
         _still_to_motion(scene.still, motion, scene.seconds, w, h)
 
     overlay = _caption_png(scene.caption, w, h, ASSETS / f"{slug}_cap.png")
@@ -361,5 +374,15 @@ def render_script(
     out = assemble(clips, ASSETS / f"{slug}.mp4", w, h)
     for c in clips:
         c.unlink(missing_ok=True)
-    log.info("video %s -> %s (%.1fs)", slug, out.name, probe_duration(out))
+
+    animated = sum(1 for s in script.scenes if s.animated)
+    if animated < len(script.scenes):
+        reasons = {s.fallback_reason for s in script.scenes if not s.animated}
+        log.warning(
+            "video %s: only %d/%d scenes have real motion, the rest are stills "
+            "with a Ken Burns move (%s)",
+            slug, animated, len(script.scenes), "; ".join(sorted(reasons))[:300],
+        )
+    log.info("video %s -> %s (%.1fs, %d/%d animated)", slug, out.name,
+             probe_duration(out), animated, len(script.scenes))
     return out
