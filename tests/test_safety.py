@@ -197,3 +197,23 @@ def test_the_republish_guard_does_not_block_a_dry_run():
                 body="Body copy long enough to clear the length gate here.",
                 remote_id="1234567890")
     assert publish_post(post, acct).dry_run is True
+
+
+def test_reddit_refuses_when_no_subreddit_is_named():
+    """Empty subreddit with the tick set satisfied both halves of the check.
+
+    sub="" and allowed_for="" compare equal, and allowed=True clears the other
+    half, so validate() returned no problems and the adapter would have tried
+    to submit to nothing. Found by mutation: removing the no-subreddit guard
+    broke no test.
+    """
+    creds = dict(client_id="c", client_secret="s", username="u",
+                 password="p", user_agent="ua")
+    for opts in (
+        {},
+        {"allowed": True},
+        {"allowed": True, "allowed_for": ""},
+        {"subreddit": "   ", "allowed": True, "allowed_for": "   "},
+    ):
+        problems = ADAPTERS["reddit"].validate(creds, opts)
+        assert any("subreddit" in p for p in problems), f"accepted {opts!r}"
