@@ -16,7 +16,9 @@ from __future__ import annotations
 import datetime as dt
 import enum
 import json
+import logging
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Iterator
 
 from sqlalchemy import (
@@ -309,8 +311,33 @@ def _sqlite_pragmas(dbapi_conn, _record):
 SessionLocal = sessionmaker(bind=_engine, expire_on_commit=False, future=True)
 
 
+def _restrict_db_permissions() -> None:
+    """Make the database owner-only.
+
+    It holds every platform credential the user enters. SQLite creates the file
+    with the process umask, which on a normal Ubuntu account is 022 - so it
+    lands world-readable (644) and any local account can lift the tokens. The
+    .env is written 600 for the same reason; this closes the larger hole.
+
+    Also covers the -wal and -shm sidecars, which contain the same data.
+    """
+    url = settings.db_url
+    if not url.startswith("sqlite"):
+        return
+    path = Path(url.split("///", 1)[-1])
+    for p in (path, path.with_name(path.name + "-wal"), path.with_name(path.name + "-shm")):
+        try:
+            if p.exists():
+                p.chmod(0o600)
+        except OSError as e:  # noqa: PERF203 - best effort, never fatal
+            logging.getLogger("adforge.db").warning(
+                "could not restrict permissions on %s: %s", p, e
+            )
+
+
 def init_db() -> None:
     Base.metadata.create_all(_engine)
+    _restrict_db_permissions()
 
 
 @contextmanager
