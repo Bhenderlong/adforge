@@ -277,6 +277,10 @@ class Metric(Base):
     id = Column(Integer, primary_key=True)
     post_id = Column(Integer, ForeignKey("posts.id"), index=True)
     captured_at = Column(DateTime, default=utcnow)
+    # False when the platform reported nothing, so the UI can say "not
+    # reported" instead of showing a real-looking zero.
+    fetched = Column(Boolean, default=True)
+    note = Column(String(200), default="")
     impressions = Column(Integer, default=0)
     likes = Column(Integer, default=0)
     comments = Column(Integer, default=0)
@@ -370,6 +374,15 @@ def _migrate() -> None:
             with _engine.begin() as conn:
                 conn.execute(text(f"ALTER TABLE posts ADD COLUMN {name} {ddl}"))
             logging.getLogger("adforge.db").info("migrated: posts.%s added", name)
+
+    if "metrics" in insp.get_table_names():
+        have_m = {c["name"] for c in insp.get_columns("metrics")}
+        for name, ddl in [("fetched", "BOOLEAN DEFAULT 1"),
+                          ("note", "VARCHAR(200) DEFAULT ''")]:
+            if name not in have_m:
+                with _engine.begin() as conn:
+                    conn.execute(text(f"ALTER TABLE metrics ADD COLUMN {name} {ddl}"))
+                logging.getLogger("adforge.db").info("migrated: metrics.%s added", name)
 
 
 def init_db() -> None:

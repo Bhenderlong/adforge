@@ -391,9 +391,17 @@ def post_detail(request: Request, post_id: int):
             meta = json.loads(post.generation_meta or "{}")
         except json.JSONDecodeError:
             pass
+        latest = (
+            s.query(Metric)
+            .filter(Metric.post_id == post.id)
+            .order_by(Metric.captured_at.desc())
+            .first()
+        )
+        stats = {c.name: getattr(latest, c.name) for c in Metric.__table__.columns} if latest else None
     return templates.TemplateResponse(
         request, "post_detail.html",
-        ctx(request, post=post, account=account, ps=spec(post.platform), meta=meta),
+        ctx(request, post=post, account=account, ps=spec(post.platform), meta=meta,
+            stats=stats),
     )
 
 

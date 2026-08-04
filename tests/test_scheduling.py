@@ -314,3 +314,46 @@ def test_video_style_is_preferred_over_the_still_style():
         vis = get_brand(key).visual
         assert vis.get("video_style"), f"{key} has no video_style"
         assert "abstract" not in vis["video_style"].lower()
+
+
+# --- metrics collection -----------------------------------------------------
+# The Metric table existed from the first commit and nothing ever wrote to it,
+# which made measuring a campaign decorative.
+
+def test_unsupported_platforms_say_so_rather_than_reporting_zero():
+    from adforge.db import Post
+    from adforge.platforms.metrics import COLLECTORS, collect
+
+    for platform in ("discord", "slack", "tiktok"):
+        assert platform not in COLLECTORS
+        s = collect(Post(platform=platform, remote_id="1"), {})
+        assert s["fetched"] is False
+        assert "no per-post engagement" in s["note"]
+
+
+def test_a_post_with_no_remote_id_is_not_queried():
+    from adforge.db import Post
+    from adforge.platforms.metrics import collect
+
+    s = collect(Post(platform="x", remote_id=""), {})
+    assert s["fetched"] is False and "no remote id" in s["note"]
+
+
+def test_collection_never_raises_on_bad_credentials():
+    """A revoked token must not break the scheduler loop."""
+    from adforge.db import Post
+    from adforge.platforms.metrics import collect
+
+    s = collect(Post(platform="x", remote_id="123"), {})  # no keys at all
+    assert s["fetched"] is False
+    assert s["impressions"] == 0
+
+
+def test_not_reported_is_distinguishable_from_zero_engagement():
+    """A real zero and 'the platform said nothing' must not look the same."""
+    from adforge.platforms.metrics import Stats
+
+    silent = Stats.empty("429")
+    genuine = Stats.of(impressions=0, likes=0)
+    assert silent["fetched"] is False and genuine["fetched"] is True
+    assert silent["impressions"] == genuine["impressions"] == 0

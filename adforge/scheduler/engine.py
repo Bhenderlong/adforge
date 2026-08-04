@@ -28,6 +28,7 @@ from sqlalchemy import and_
 from ..config import settings
 from ..db import (
     Account,
+    Metric,
     Post,
     PostMode,
     PostStatus,
@@ -336,6 +337,50 @@ def run_radar() -> int:
         return 0
 
 
+# How long to keep pulling stats for a post. Engagement on these platforms is
+# effectively over well before this; collecting forever would burn API quota on
+# rows that never change again.
+METRICS_WINDOW_HOURS = 72
+
+
+def collect_metrics() -> int:
+    """Pull engagement for recently published posts. Best effort, read-only."""
+    from ..platforms.metrics import collect
+
+    updated = 0
+    cutoff = utcnow() - dt.timedelta(hours=METRICS_WINDOW_HOURS)
+    with session_scope() as session:
+        posts = (
+            session.query(Post)
+            .filter(Post.status == PostStatus.PUBLISHED)
+            .filter(Post.published_at.isnot(None), Post.published_at >= cutoff)
+            .filter(Post.remote_id != "")
+            .all()
+        )
+        if not posts:
+            return 0
+        accounts = {a.id: a for a in session.query(Account).all()}
+
+    for post in posts:
+        acct = accounts.get(post.account_id)
+        if acct is None or not acct.enabled:
+            continue
+        stats = collect(post, acct.creds())
+        # One row per collection, so a post's trajectory is visible rather than
+        # just its latest state.
+        with session_scope() as session:
+            session.add(Metric(
+                post_id=post.id, fetched=bool(stats["fetched"]),
+                note=str(stats.get("note", ""))[:200],
+                impressions=int(stats["impressions"]), likes=int(stats["likes"]),
+                comments=int(stats["comments"]), shares=int(stats["shares"]),
+                clicks=int(stats["clicks"]),
+            ))
+        updated += 1
+    log.info("metrics collected for %d post(s)", updated)
+    return updated
+
+
 def build_scheduler() -> BackgroundScheduler:
     sched = BackgroundScheduler(timezone="UTC")
     sched.add_job(plan_ahead, "interval", hours=1, id="plan",
@@ -345,4 +390,7 @@ def build_scheduler() -> BackgroundScheduler:
                   max_instances=1, coalesce=True)
     sched.add_job(run_radar, "interval", minutes=settings.radar_interval_minutes,
                   id="radar", max_instances=1, coalesce=True)
+    # Slow loop: engagement moves over hours, and every call spends API quota.
+    sched.add_job(collect_metrics, "interval", hours=2, id="metrics",
+                  max_instances=1, coalesce=True)
     return sched

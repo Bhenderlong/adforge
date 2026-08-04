@@ -151,6 +151,28 @@
       </p>
     </div>
 
+    {% if post.status.value == 'PUBLISHED' %}
+    <div class="card" style="margin-top:14px">
+      <h3>Engagement</h3>
+      {% if stats and stats.fetched %}
+        <table>
+          <tr><td class="faint">Impressions</td><td>{{ '{:,}'.format(stats.impressions) }}</td></tr>
+          <tr><td class="faint">Likes</td><td>{{ '{:,}'.format(stats.likes) }}</td></tr>
+          <tr><td class="faint">Comments</td><td>{{ '{:,}'.format(stats.comments) }}</td></tr>
+          <tr><td class="faint">Shares</td><td>{{ '{:,}'.format(stats.shares) }}</td></tr>
+          {% if stats.clicks %}<tr><td class="faint">Link clicks</td><td>{{ '{:,}'.format(stats.clicks) }}</td></tr>{% endif %}
+          <tr><td class="faint">As of</td><td class="faint mono">{{ stats.captured_at|localtime }}</td></tr>
+        </table>
+      {% elif stats %}
+        <p class="faint">Not reported{% if stats.note %} ({{ stats.note }}){% endif %}.
+           A zero here would be a guess, so nothing is shown.</p>
+      {% else %}
+        <p class="faint">Not collected yet — the metrics job runs every 2 hours
+           for posts published in the last 72 hours.</p>
+      {% endif %}
+    </div>
+    {% endif %}
+
     <div class="card" style="margin-top:14px">
       <h3>Provenance</h3>
       <table>
