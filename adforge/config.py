@@ -130,6 +130,13 @@ class Settings(BaseSettings):
     # Hard ceiling per brand per platform per day, independent of schedule.
     daily_post_cap: int = 6
 
+    # Roughly how long one post takes end to end: angle, up to four write
+    # attempts, critic and factcheck on the writer model, plus an image. Used
+    # only to warn when a schedule asks for more than the box can produce in a
+    # day - measured at ~12 minutes for a 70B on two 5090s, so the default is
+    # deliberately not optimistic. Video posts cost several times this.
+    minutes_per_post: int = 12
+
     # ---- radar -------------------------------------------------------------
     radar_enabled: bool = True
     radar_interval_minutes: int = 30

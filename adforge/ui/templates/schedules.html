@@ -21,9 +21,25 @@
      in review before an AUTO account publishes it. Set that to 0 on
      <a href="/settings">Settings</a> for fully hands-off operation. A post that
      failed the quality bar always waits for a human regardless.</p>
+  <p>Currently scheduled: <strong>{{ capacity.posts }} posts/day</strong>
+     {%- if capacity.video_posts %} ({{ capacity.video_posts }} with video){% endif %},
+     roughly <strong>{{ capacity.hours }} hours</strong> of generation on this
+     machine.</p>
   <p class="faint">Hard ceiling: {{ settings.daily_post_cap }} posts per brand per
      platform per day, whatever the schedule says.</p>
 </div>
+
+{% if capacity.over %}
+<div class="note bad">
+  <p><strong>This schedule asks for more than the machine can generate.</strong>
+     {{ capacity.posts }} posts a day is about {{ capacity.hours }} hours of work
+     on a 70B writer, and video posts cost several times a text one.</p>
+  <p>Slots that cannot be filled in time fail <em>silently</em> — the planner
+     simply runs out of hours, so it looks like posts stopped appearing with
+     nothing to point at. Reduce posts/day, turn media off on some platforms,
+     or set a smaller writer model on <a href="/settings">Settings</a>.</p>
+</div>
+{% endif %}
 
 {% for sched in schedules %}
 {% set acct = accounts.get((sched.brand, sched.platform)) %}

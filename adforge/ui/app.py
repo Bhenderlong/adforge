@@ -48,7 +48,7 @@ from ..db import (
 from ..llm.client import health as llm_health
 from ..media import comfy
 from ..platforms.registry import ADAPTERS, account_status, publish_post
-from ..platforms.spec import SPECS, spec
+from ..platforms.spec import SPECS, VIDEO_FIRST, spec
 from ..scheduler.engine import build_scheduler, plan_ahead, promote_and_publish
 from ..scheduler.planner import plan_slots, tz
 
@@ -699,9 +699,33 @@ def schedules(request: Request):
                 day = utcnow().astimezone(tz()).date() + dt.timedelta(days=d)
                 slots += plan_slots(sched, day)
             preview[sched.id] = sorted(slots)[:8]
+
+        # Warn when the schedules together ask for more than the machine can
+        # generate. Slots that cannot be filled fail silently - the planner
+        # just runs out of time - so the failure looks like "posts stopped
+        # appearing" with nothing to point at.
+        daily = 0
+        video_daily = 0
+        for sched in rows:
+            if not sched.enabled:
+                continue
+            n = min(int(sched.posts_per_day or 0), settings.daily_post_cap)
+            daily += n
+            if sched.attach_media and sched.platform in VIDEO_FIRST:
+                video_daily += n
+        # A video post is several renders plus a script, not one generation.
+        est_minutes = (daily - video_daily) * settings.minutes_per_post
+        est_minutes += video_daily * settings.minutes_per_post * 5
+        capacity = {
+            "posts": daily,
+            "video_posts": video_daily,
+            "hours": round(est_minutes / 60, 1),
+            "over": est_minutes > 20 * 60,
+        }
     return templates.TemplateResponse(
         request, "schedules.html",
-        ctx(request, schedules=rows, accounts=accounts, preview=preview, tz=tz()),
+        ctx(request, schedules=rows, accounts=accounts, preview=preview,
+            tz=tz(), capacity=capacity),
     )
 
 
