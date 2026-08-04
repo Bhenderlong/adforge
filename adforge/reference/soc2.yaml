@@ -1,0 +1,92 @@
+# SOC 2 Trust Services Criteria (2017, with 2022 revised points of focus).
+#
+# Used two ways:
+#   1. Grounding - when a post is about a named criterion, the real text is
+#      injected into the prompt so the model describes the actual control.
+#   2. Validation - a post citing a criterion ID not in this file is blocked.
+#
+# Without this the writer confidently mismaps criteria (it produced a CC7.1
+# post about vendor risk, which is CC9.2). Compliance leads notice immediately,
+# and for a GRC product that error costs more credibility than a dull post.
+#
+# Wording is condensed from the AICPA criteria, not verbatim. Verify against
+# the official TSP section 100 before using any of this in a formal document.
+
+common_criteria:
+  CC1.1: Demonstrates a commitment to integrity and ethical values.
+  CC1.2: Board of directors exercises oversight independent of management.
+  CC1.3: Management establishes structures, reporting lines, authorities and responsibilities.
+  CC1.4: Demonstrates a commitment to attract, develop and retain competent individuals.
+  CC1.5: Holds individuals accountable for their internal control responsibilities.
+
+  CC2.1: Obtains or generates relevant, quality information to support internal control.
+  CC2.2: Internally communicates information, including control objectives and responsibilities.
+  CC2.3: Communicates with external parties about matters affecting internal control.
+
+  CC3.1: Specifies objectives with sufficient clarity to identify and assess related risks.
+  CC3.2: Identifies and analyses risks to the achievement of its objectives.
+  CC3.3: Considers the potential for fraud in assessing risks.
+  CC3.4: Identifies and assesses changes that could significantly impact internal control.
+
+  CC4.1: Selects, develops and performs ongoing and separate evaluations of controls.
+  CC4.2: Evaluates and communicates control deficiencies to those responsible for corrective action.
+
+  CC5.1: Selects and develops control activities that mitigate risks to acceptable levels.
+  CC5.2: Selects and develops general control activities over technology.
+  CC5.3: Deploys control activities through policies and procedures.
+
+  CC6.1: Implements logical access security software, infrastructure and architectures over protected information assets.
+  CC6.2: Registers and authorises new internal and external users before granting access credentials.
+  CC6.3: Authorises, modifies or removes access to data, software and functions based on roles and least privilege.
+  CC6.4: Restricts physical access to facilities and protected information assets.
+  CC6.5: Discontinues logical and physical protections over physical assets only after the ability to read data has been removed.
+  CC6.6: Implements logical access security measures against threats from outside its system boundaries.
+  CC6.7: Restricts the transmission, movement and removal of information to authorised users and protects it during transmission.
+  CC6.8: Implements controls to prevent or detect and act upon the introduction of unauthorised or malicious software.
+
+  CC7.1: Uses detection and monitoring procedures to identify changes to configurations that introduce new vulnerabilities, and susceptibilities to newly discovered vulnerabilities.
+  CC7.2: Monitors system components for anomalies indicative of malicious acts, natural disasters and errors, and analyses them to determine whether they represent security events.
+  CC7.3: Evaluates security events to determine whether they could or have resulted in a failure to meet objectives (a security incident).
+  CC7.4: Responds to identified security incidents by executing a defined incident response programme.
+  CC7.5: Identifies, develops and implements activities to recover from identified security incidents.
+
+  CC8.1: Authorises, designs, develops, configures, documents, tests, approves and implements changes to infrastructure, data, software and procedures.
+
+  CC9.1: Identifies, selects and develops risk mitigation activities for risks arising from potential business disruptions.
+  CC9.2: Assesses and manages risks associated with vendors and business partners.
+
+availability:
+  A1.1: Maintains, monitors and evaluates current processing capacity and use of infrastructure to manage demand and enable capacity.
+  A1.2: Authorises, designs, develops, implements, operates, approves, maintains and monitors environmental protections, software, data backup processes and recovery infrastructure.
+  A1.3: Tests recovery plan procedures supporting system recovery.
+
+confidentiality:
+  C1.1: Identifies and maintains confidential information to meet objectives related to confidentiality.
+  C1.2: Disposes of confidential information to meet objectives related to confidentiality.
+
+processing_integrity:
+  PI1.1: Obtains or generates, uses and communicates relevant, quality information regarding processing, including definitions of data processed and product/service specifications.
+  PI1.2: Implements policies and procedures over system inputs, including controls over completeness and accuracy.
+  PI1.3: Implements policies and procedures over system processing to result in products, services and reporting to meet objectives.
+  PI1.4: Implements policies and procedures to make available or deliver output completely, accurately and timely.
+  PI1.5: Implements policies and procedures to store inputs, items in processing and outputs completely, accurately and timely.
+
+privacy:
+  P1.1: Provides notice about its privacy practices to data subjects.
+  P2.1: Communicates choices available regarding the collection, use, retention, disclosure and disposal of personal information, and obtains consent.
+  P3.1: Collects personal information consistent with its objectives related to privacy.
+  P3.2: Obtains explicit consent for sensitive personal information where required.
+  P4.1: Limits the use of personal information to the purposes identified in its notice and consented to.
+  P4.2: Retains personal information consistent with its objectives related to privacy.
+  P4.3: Securely disposes of personal information to meet its objectives.
+  P5.1: Grants data subjects access to their personal information for review and update.
+  P5.2: Corrects, amends or appends personal information based on information provided by data subjects.
+  P6.1: Discloses personal information to third parties only for identified purposes and with consent.
+  P6.2: Creates and retains a record of authorised disclosures of personal information.
+  P6.3: Creates and retains a record of detected or reported unauthorised disclosures.
+  P6.4: Obtains privacy commitments from vendors and other third parties who have access to personal information.
+  P6.5: Obtains commitments from vendors to notify the entity of actual or suspected unauthorised disclosures.
+  P6.6: Provides notification of breaches and incidents to affected data subjects, regulators and others.
+  P6.7: Provides data subjects with an accounting of the personal information held and disclosures made.
+  P7.1: Collects and maintains accurate, up-to-date, complete and relevant personal information.
+  P8.1: Implements a process for receiving, addressing, resolving and communicating the resolution of privacy inquiries, complaints and disputes.

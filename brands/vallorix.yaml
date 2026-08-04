@@ -1,0 +1,121 @@
+key: vallorix
+name: Vallorix
+url: https://vallorix.ai
+tagline: Compliance automation that runs on your infrastructure
+
+about: >
+  Vallorix is compliance automation that runs on your own infrastructure. Every
+  other platform in this category asks you to upload your evidence - policies,
+  access reviews, infrastructure configuration, personnel records - into their
+  tenant. Vallorix inverts that: you deploy it yourself, and evidence is
+  collected, stored and assessed inside your environment. It provides
+  continuous control monitoring, automated evidence collection, a live risk
+  register, vendor and third-party risk, access reviews, questionnaire
+  automation, policy management and auditor-ready reporting across SOC 2,
+  ISO 27001, HIPAA, GDPR, ISO 42001, NIS2 and DORA. Built by the team behind
+  Inferix.
+
+audience: >
+  Security, GRC and compliance leads at regulated or data-sensitive companies -
+  healthcare, financial services, defence, EU-resident businesses - who are
+  blocked from SaaS GRC tools by residency, sovereignty or customer contract
+  terms, plus engineering-led startups facing their first SOC 2.
+
+proof_points:
+  - Self-hosted - evidence and audit artefacts never leave your boundary
+  - Continuous control monitoring with automated evidence collection
+  - SOC 2, ISO 27001, HIPAA, GDPR, ISO 42001, NIS2, DORA, plus user-defined frameworks
+  - Live risk register, vendor and third-party risk, access reviews
+  - Questionnaire automation and policy management
+  - A private AI assistant drafts policies and answers questionnaires on your own hardware
+  - Auditor-ready reporting and a shareable trust centre
+  - Solves data residency and sovereignty objections that block SaaS GRC purchases
+
+pillars:
+  - key: security_tips
+    weight: 3
+    label: Security tips and tricks
+    description: >
+      One practical control, hardening step or detection technique a security
+      engineer can implement this week. Concrete configuration, not principles.
+  - key: compliance_howto
+    weight: 3
+    label: Compliance made concrete
+    description: >
+      Demystify one specific requirement - a named SOC 2 Trust Services
+      criterion, an ISO 27001 Annex A control, a HIPAA safeguard - in terms of
+      what evidence an auditor actually asks for.
+  - key: audit_prep
+    weight: 2
+    label: Audit preparation
+    description: >
+      What goes wrong in real audits and how to avoid it - evidence gaps,
+      access review drift, stale policies, screenshot-based evidence rotting.
+  - key: residency
+    weight: 2
+    label: Data residency and sovereignty
+    description: >
+      Why evidence location matters, what contracts and regulations actually
+      require, and what self-hosting changes about the risk calculus.
+  - key: product
+    weight: 2
+    label: Product capability
+    description: >
+      One capability shown concretely - a control monitored continuously, an
+      evidence collector, the trust centre, questionnaire automation.
+
+keywords:
+  - SOC 2
+  - ISO 27001
+  - HIPAA compliance
+  - GRC
+  - compliance automation
+  - security questionnaire
+  - data residency
+  - audit evidence
+  - self-hosted
+
+cta_variants:
+  - See how it works at vallorix.ai
+  - "Self-host it yourself: vallorix.ai"
+  - Framework coverage and docs at vallorix.ai
+  - "Deploy it in your own environment: vallorix.ai"
+
+visual:
+  style: >
+    Restrained enterprise-security aesthetic. Deep slate and navy grounds,
+    controlled accent in steel blue and muted gold, architectural geometry,
+    vault and shield motifs rendered abstractly, layered depth, precise lines.
+    Serious, credible, understated. Reads as trustworthy infrastructure.
+  negative: >
+    hoodie hacker, green matrix code, skull, padlock cliche, stock photo people,
+    cheesy, cluttered, watermark, text artifacts, garbled letters, low quality, blurry
+  palette: ["#334155", "#1e293b", "#94a3b8", "#b8944d"]
+
+voice:
+  do:
+    - Be precise about frameworks - name the actual control or criterion
+    - Respect the reader's expertise; they know more compliance than the post does
+    - Be concrete about what evidence auditors accept
+    - Acknowledge that compliance work is tedious; do not pretend it is exciting
+  dont:
+    - Fear-based selling, breach statistics as a scare tactic
+    - Hype adjectives or startup cadence - this audience distrusts it
+    - Implying the product replaces an auditor
+    - Any claim not traceable to proof_points
+
+# Legally load-bearing. Enforced in code by llm/rules.py, not just prompted -
+# social copy gets screenshotted and scraped, so a slip here is durable.
+hard_rules:
+  - >
+    NEVER state or imply that Vallorix holds, has achieved, is certified under,
+    or is compliant with SOC 2, ISO 27001, HIPAA or any other framework. The
+    product AUTOMATES those programmes for its users. Correct: "automates SOC 2
+    evidence collection". Forbidden: "SOC 2 certified", "we are SOC 2
+    compliant", "our ISO 27001 certification".
+  - >
+    NEVER promise a specific audit outcome, pass rate, or certification
+    timeline. No "get SOC 2 in 30 days", no "guaranteed to pass".
+  - >
+    NEVER claim Vallorix is a substitute for a licensed auditor or for legal
+    advice.
