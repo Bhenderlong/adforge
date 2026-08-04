@@ -101,12 +101,23 @@ def _platform_block(ps: PlatformSpec, brand: Brand) -> str:
         )
     else:
         link = f"Include the URL {brand.url} once, placed where it reads naturally."
+    # Without this the model keeps emitting backticks that the gate then
+    # blocks, burning a regeneration attempt each time on a fault it was never
+    # told about.
+    markup = (
+        "Markdown renders here, so backticks for code and ** for emphasis are "
+        "fine."
+        if ps.renders_markup
+        else f"NO markdown. Backticks and asterisks publish as literal "
+             f"characters on {ps.label} - write code inline as plain words."
+    )
     out = [
         f"PLATFORM: {ps.label}",
         f"HARD LIMIT: {ps.max_chars} characters. Going over means the post is discarded.",
         f"REGISTER: {ps.register}",
         tags,
         link,
+        markup,
     ]
     if ps.notes:
         out.append(f"NOTE: {ps.notes}")
