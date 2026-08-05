@@ -101,6 +101,26 @@ Four things make it the wrong runtime here, in descending order of importance:
   rules were read.
 - Rate limiting and backoff handled by PRAW defaults; no retry storms.
 
+## "What subreddits do you intend to use the bot/app in?"
+
+Answer honestly, because the source is linked and the two scopes differ:
+
+> **Search is sitewide.** It uses Reddit's own search endpoint over r/all for a
+> short keyword list. That is the only way to find the threads worth answering,
+> and it is a read-only use of the official search API.
+>
+> **Posting is restricted to an allowlist** I confirm per-subreddit after reading
+> that subreddit's self-promotion rules. Currently: r/LocalLLaMA, r/comfyui,
+> r/selfhosted, r/homelab (Inferix); r/cybersecurity, r/AskNetsec (Vallorix).
+> The adapter refuses any subreddit not on it.
+>
+> **Replies can occur wherever a matching thread is**, since that is inherent to
+> sitewide search. Three constraints apply to those: I approve each one
+> individually, they are capped at 8/day across all of Reddit, and a reply to a
+> thread found sitewide **never carries a link** — links require me to have
+> allowlisted that specific subreddit first. So the default posture in a
+> community whose rules I have not read is a disclosed, link-free answer.
+
 ## Contact
 
 (email on the form) inferix.co, vallorix.ai
