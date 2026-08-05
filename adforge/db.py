@@ -217,6 +217,13 @@ class RadarThread(Base):
     # Set when the sub/channel rules forbid promotion - draft is suppressed.
     promo_allowed = Column(Boolean, default=True)
     rules_note = Column(String(400), default="")
+    # Which target found this. Without it the draft and send paths both did
+    # .filter(brand, source).first() to decide whether links are permitted -
+    # arbitrary the moment a brand has two targets on one source, which is the
+    # normal case (sitewide plus a specific subreddit you have read the rules
+    # for). The tick could be on the subreddit and the reply still come back
+    # link-free, with nothing anywhere explaining why.
+    target_id = Column(Integer, index=True, default=None)
 
     seen_at = Column(DateTime, default=utcnow)
     dismissed = Column(Boolean, default=False)
@@ -374,6 +381,13 @@ def _migrate() -> None:
             with _engine.begin() as conn:
                 conn.execute(text(f"ALTER TABLE posts ADD COLUMN {name} {ddl}"))
             logging.getLogger("adforge.db").info("migrated: posts.%s added", name)
+
+    if "radar_threads" in insp.get_table_names():
+        have_r = {c["name"] for c in insp.get_columns("radar_threads")}
+        if "target_id" not in have_r:
+            with _engine.begin() as conn:
+                conn.execute(text("ALTER TABLE radar_threads ADD COLUMN target_id INTEGER"))
+            logging.getLogger("adforge.db").info("migrated: radar_threads.target_id added")
 
     if "metrics" in insp.get_table_names():
         have_m = {c["name"] for c in insp.get_columns("metrics")}

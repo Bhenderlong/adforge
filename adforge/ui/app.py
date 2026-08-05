@@ -52,7 +52,7 @@ from ..platforms.registry import (ADAPTERS, account_status, is_dry,
                                   publish_post)
 from ..platforms.spec import SPECS, VIDEO_FIRST, spec
 from ..scheduler.engine import build_scheduler, plan_ahead, promote_and_publish
-from ..scheduler.planner import plan_slots, tz
+from ..scheduler.planner import plan_slots_detailed, tz
 
 log = logging.getLogger("adforge.ui")
 
@@ -855,7 +855,11 @@ def schedules(request: Request):
                 # the preview start at tomorrow from 20:00 local onward, so it
                 # hid exactly the slots about to be filled tonight.
                 day = utcnow().astimezone(tz()).date() + dt.timedelta(days=d)
-                slots += plan_slots(sched, day)
+                # NOMINAL times, not jittered ones. plan_ahead draws its own
+                # independent jitter when it actually fills the slot, so the
+                # jittered values here previewed times that will never be used
+                # and changed on every refresh of a page nothing had altered.
+                slots += [nominal for nominal, _ in plan_slots_detailed(sched, day)]
             preview[sched.id] = sorted(slots)[:8]
 
         # Why an enabled schedule produces no slots. Empty days_of_week or
@@ -1126,7 +1130,14 @@ def account_test(account_id: int):
 
 
 @app.get("/radar", response_class=HTMLResponse)
-def radar(request: Request, brand: str = "", min_rel: float = 0.0):
+def radar(request: Request, brand: str = "", min_rel: str = ""):
+    # Taken as a string: this box has onchange="this.form.submit()" and no
+    # `required`, so clearing it submits min_rel= - and a float-typed query
+    # param made that a raw 422 JSON page, from a filter control.
+    try:
+        min_rel = float(min_rel) if str(min_rel).strip() else 0.0
+    except ValueError:
+        min_rel = 0.0
     with session_scope() as s:
         q = s.query(RadarThread).filter(RadarThread.dismissed.is_(False))
         if brand:
@@ -1283,6 +1294,23 @@ def radar_scan_now():
     return RedirectResponse("/radar", status_code=303)
 
 
+def _target_for(session, thread) -> "RadarTarget | None":
+    """The target that found this thread.
+
+    Falls back to a brand+source match for rows scanned before target_id
+    existed. The fallback is the old arbitrary .first(), so it is only used
+    where there is genuinely nothing better to go on.
+    """
+    if getattr(thread, "target_id", None):
+        found = session.get(RadarTarget, thread.target_id)
+        if found is not None:
+            return found
+    return (session.query(RadarTarget)
+                   .filter(RadarTarget.brand == thread.brand,
+                           RadarTarget.source == thread.source)
+                   .first())
+
+
 @app.post("/radar/thread/{thread_id}/draft")
 def radar_draft(thread_id: int):
     # min_relevance was stored, rendered and editable but read by nothing -
@@ -1293,10 +1321,7 @@ def radar_draft(thread_id: int):
         thread = s.get(RadarThread, thread_id)
         if not thread:
             raise HTTPException(404, "no such thread")
-        target = (s.query(RadarTarget)
-                   .filter(RadarTarget.brand == thread.brand,
-                           RadarTarget.source == thread.source)
-                   .first())
+        target = _target_for(s, thread)
         if target and thread.relevance < target.min_relevance:
             raise HTTPException(
                 400,
@@ -1314,12 +1339,7 @@ def _draft_job(thread_id: int) -> str:
         thread = s.get(RadarThread, thread_id)
         if not thread:
             return "thread gone"
-        target = (
-            s.query(RadarTarget)
-            .filter(RadarTarget.brand == thread.brand)
-            .filter(RadarTarget.source == thread.source)
-            .first()
-        )
+        target = _target_for(s, thread)
         links_allowed = bool(
             thread.promo_allowed and target and target.promo_allowed
         )
@@ -1403,12 +1423,10 @@ def _send_reply_job(draft_id: int) -> str:
             draft.error = "no enabled account for this source"
             return draft.error
 
-        target = (
-            s.query(RadarTarget)
-            .filter(RadarTarget.brand == thread.brand,
-                    RadarTarget.source == thread.source)
-            .first()
-        )
+        # Same lookup as the draft path. These two disagreeing would mean a
+        # reply drafted without a link could acquire one at send time, or the
+        # reverse.
+        target = _target_for(s, thread)
         links_allowed = bool(thread.promo_allowed and target and target.promo_allowed)
 
         # Re-check policy at send time: the body may have been edited in the UI
@@ -1475,7 +1493,7 @@ def brand_save(key: str, content: str = Form(...)):
         path.write_text(backup.read_text())
         reload_brands()
         raise HTTPException(400, f"rejected, restored previous: {e}") from None
-    return RedirectResponse("/brands", status_code=303)
+    return RedirectResponse(f"/brands?saved={quote(key)}", status_code=303)
 
 
 # ---------------------------------------------------------------------------

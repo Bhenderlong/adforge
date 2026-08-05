@@ -1,6 +1,10 @@
 {% extends "base.html" %}
 {% block title %}Brands — AdForge{% endblock %}
 {% block body %}
+{% if request.query_params.get('saved') %}
+<div class="note"><p><strong>Saved {{ request.query_params.get('saved') }}.</strong>
+   The brand file was rewritten and reloaded — new posts use it immediately.</p></div>
+{% endif %}
 <h1>Brand profiles</h1>
 <p class="sub">Voice, approved claims, pillars and visual direction. This is what
    the writer is grounded on.</p>

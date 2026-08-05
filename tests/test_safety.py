@@ -522,3 +522,40 @@ def test_dead_flash_helper_is_gone():
     """
     src = pathlib.Path("adforge/ui/app.py").read_text()
     assert "session_flash" not in src
+
+
+def test_the_schedule_preview_is_stable_across_renders():
+    """It used to call plan_slots(), which jitters.
+
+    plan_ahead draws its own independent jitter when it fills the slot, so the
+    preview was showing times that would never be used - and changing on every
+    refresh of a page nothing had altered.
+    """
+    src = pathlib.Path("adforge/ui/app.py").read_text()
+    preview = src.split("preview = {}", 1)[1].split("stalled = {}", 1)[0]
+    assert "plan_slots_detailed" in preview
+    assert "for nominal, _ in" in preview, "preview must take the nominal time"
+
+
+def test_the_radar_relevance_filter_survives_being_cleared():
+    """It has onchange=submit and no `required`, so clearing it submits ''.
+
+    A float-typed query param turned that into a raw 422 JSON page - from a
+    filter control, on a GET.
+    """
+    src = pathlib.Path("adforge/ui/app.py").read_text()
+    sig = src.split("def radar(request: Request", 1)[1].split("\n", 1)[0]
+    assert "min_rel: str" in sig, f"min_rel must be tolerant of '', got: {sig}"
+
+
+def test_both_link_decisions_use_the_same_target():
+    """Draft time and send time must agree on whether links are permitted.
+
+    Both used .filter(brand, source).first(), which is arbitrary as soon as a
+    brand has two targets on one source - the normal case, since a sitewide
+    target sits alongside the specific subreddits whose rules you have read.
+    """
+    src = pathlib.Path("adforge/ui/app.py").read_text()
+    assert src.count("_target_for(s, thread)") >= 3
+    body = src.split("def _draft_job", 1)[1]
+    assert "RadarTarget.brand == thread.brand" not in body.split("def _target_for")[0]

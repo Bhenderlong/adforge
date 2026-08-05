@@ -214,6 +214,7 @@ def scan_reddit(session, target: RadarTarget, creds: dict) -> int:
                 matched_keywords=",".join(hits)[:390],
                 promo_allowed=promo,
                 rules_note=note[:390],
+                target_id=target.id,
             )
         )
         session.commit()
@@ -368,6 +369,7 @@ def scan_discord(session, target: RadarTarget, creds: dict) -> int:
                 matched_keywords=",".join(hits)[:390],
                 promo_allowed=promo,
                 rules_note=note[:390],
+                target_id=target.id,
             )
         )
         session.commit()

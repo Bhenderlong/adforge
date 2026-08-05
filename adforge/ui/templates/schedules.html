@@ -152,7 +152,8 @@
 
       <button class="primary" type="submit">Save schedule</button>
       {% if preview.get(sched.id) %}
-        <span class="faint" style="margin-left:12px">Next slots:
+        <span class="faint" style="margin-left:12px"
+              title="Nominal times. Each post is jittered by up to a few minutes when it is actually created, so it does not look machine-timed.">Next slots (±jitter):
           {% for slot in preview[sched.id] %}
             <span class="tag">{{ slot.astimezone(tz).strftime('%a %H:%M') }}</span>
           {% endfor %}

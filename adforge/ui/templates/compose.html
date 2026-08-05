@@ -17,7 +17,8 @@
       </div>
       <div class="field">
         <label>Platform</label>
-        <select name="platform">
+        <select name="platform" id="platform"
+                data-noimage="{{ platforms.items()|selectattr('1.supports_image', 'equalto', false)|map(attribute='0')|join(',') }}">
           {% for k, p in platforms.items() %}
             <option value="{{ k }}">{{ p.label }} ({{ p.max_chars }} chars)</option>
           {% endfor %}
@@ -56,9 +57,12 @@
     </div>
 
     <label class="inline">
-      <input type="checkbox" name="with_media" value="1" checked>
+      <input type="checkbox" name="with_media" id="with_media" value="1" checked>
       Generate an image for it
     </label>
+    <div class="hint warn hidden" id="noimage">This platform is video-first and
+      takes no still image, so this box has no effect on it — the post will be
+      created without one.</div>
 
     <div style="margin-top:14px">
       <button class="primary" type="submit">Generate</button>
@@ -74,4 +78,27 @@
   <p>Generated posts land in <strong>REVIEW</strong> as MANUAL, so nothing
      composed here publishes without an explicit approval.</p>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// The box is checked by default and was silently ignored on video-first
+// platforms: no image, no note, no "media failed" pill, because the branch
+// that records that is never entered. Say so rather than quietly dropping a
+// deliberately requested asset.
+(function () {
+  const sel = document.getElementById('platform');
+  const box = document.getElementById('with_media');
+  const msg = document.getElementById('noimage');
+  if (!sel || !box || !msg) return;
+  const none = (sel.dataset.noimage || '').split(',').filter(Boolean);
+  const upd = () => {
+    const off = none.includes(sel.value);
+    msg.classList.toggle('hidden', !off);
+    box.disabled = off;
+  };
+  sel.addEventListener('change', upd);
+  upd();
+})();
+</script>
 {% endblock %}
