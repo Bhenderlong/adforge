@@ -47,6 +47,7 @@ from ..db import (
 )
 from ..llm.client import health as llm_health
 from ..media import comfy
+from ..platforms import credhelp
 from ..platforms.registry import (ADAPTERS, account_status, is_dry,
                                   publish_post)
 from ..platforms.spec import SPECS, VIDEO_FIRST, spec
@@ -190,6 +191,7 @@ def _target_label(target: str, source: str) -> str:
 
 templates.env.filters["localtime"] = _localtime
 templates.env.globals["target_label"] = _target_label
+templates.env.globals["cred_help"] = credhelp.help_for
 
 
 # Bounded: two concurrent jobs already saturate the GPU lock, and a deeper

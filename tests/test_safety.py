@@ -384,3 +384,38 @@ def test_a_sitewide_target_is_not_labelled_like_a_subreddit():
     assert _target_label("*", "discord") == "every channel the bot can read"
     # A real subreddit must still be shown the normal way.
     assert _target_label("LocalLLaMA", "reddit") == "r/LocalLLaMA"
+
+
+def test_every_credential_field_says_where_to_get_it():
+    """A bare `client_id` label with an empty box is not setup guidance.
+
+    Reddit's client_id is the value with no label printed beside it on Reddit's
+    own page, so an empty box next to the words "client_id" is exactly the
+    situation where someone pastes the app name instead.
+    """
+    from adforge.platforms.credhelp import help_for
+    from adforge.platforms.registry import ADAPTERS
+
+    missing = []
+    for key, adapter in ADAPTERS.items():
+        fields = list(adapter.required_credentials)
+        if key == "discord":  # declared optional; rendered explicitly
+            fields = ["webhook_url", "bot_token", "channel_id"]
+        for field in fields:
+            where, _ = help_for(key, field)
+            if not where:
+                missing.append(f"{key}.{field}")
+    assert not missing, f"credential fields with no guidance: {missing}"
+
+
+def test_the_credential_gotchas_that_cost_an_hour_are_stated():
+    from adforge.platforms.credhelp import help_for
+
+    # A script app is bound to its creating account and dies under 2FA.
+    assert "CREATED it" in help_for("reddit", "username")[1]
+    assert "2FA" in help_for("reddit", "password")[1]
+    # The client_id/app-name confusion is the single most common failure.
+    assert "app name" in help_for("reddit", "client_id")[1]
+    # A webhook cannot read, so the radar cannot run on one.
+    assert "READ" in help_for("discord", "webhook_url")[1]
+    assert "MESSAGE CONTENT" in help_for("discord", "bot_token")[1]

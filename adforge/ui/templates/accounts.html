@@ -83,13 +83,16 @@
           <label>{{ field }}</label>
           <input type="password" name="cred_{{ field }}" autocomplete="off"
                  placeholder="{{ '•••••• stored' if creds[acct.id].get(field) else 'not set' }}">
+          {% set where, gotcha = cred_help(acct.platform, field) %}
           <div class="hint">
+            {% if where %}{{ where }}{% endif %}
             {% if creds[acct.id].get(field) %}
-              Stored. Leave blank to keep it; type to replace.
-            {% else %}
+              <br>Stored. Leave blank to keep it; type to replace.
+            {% elif not where %}
               Required.
             {% endif %}
           </div>
+          {% if gotcha %}<div class="hint warn">{{ gotcha }}</div>{% endif %}
         </div>
         {% endfor %}
 
@@ -99,6 +102,11 @@
             <label>{{ field }}</label>
             <input type="password" name="cred_{{ field }}" autocomplete="off"
                    placeholder="{{ '•••••• stored' if creds[acct.id].get(field) else 'not set' }}">
+            {% set where, gotcha = cred_help('discord', field) %}
+            <div class="hint">{{ where }}
+              {%- if creds[acct.id].get(field) %}<br>Stored. Leave blank to keep
+                it; type to replace.{% endif %}</div>
+            {% if gotcha %}<div class="hint warn">{{ gotcha }}</div>{% endif %}
           </div>
           {% endfor %}
           <div class="hint" style="grid-column:1/-1">
