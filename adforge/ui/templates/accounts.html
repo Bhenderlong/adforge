@@ -8,6 +8,13 @@
 {% if q.get('cleared') %}
 <div class="note"><p><strong>Deleted {{ q.get('cleared') }}</strong> from
    {{ q.get('on') }}.</p></div>
+{% elif q.get('pinned') %}
+<div class="note warn"><p><strong>{{ q.get('pinned') }} was pinned to dry
+   run.</strong> You enabled it while its Transmission was set to "inherit" and
+   the global switch is off, which would have made it publish for real
+   immediately. Choose <strong>LIVE</strong> in its Transmission dropdown when
+   you actually want that — going live should be an act, not a side effect of
+   ticking a different box.</p></div>
 {% elif q.get('was-not-set') %}
 <div class="note warn"><p><strong>Nothing to delete.</strong>
    {{ q.get('was-not-set') }} was not set on {{ q.get('on') }}.</p></div>
@@ -261,6 +268,11 @@
           Test connection
         </button>
         <span class="faint" id="test-{{ acct.id }}"></span>
+      </div>
+      <div class="hint">Test connection reads the <strong>saved</strong>
+        credentials, not what is currently typed — save first, or it will report
+        the new values as missing. It is read-only: it identifies the account and
+        cannot post anything.
         {% if not ready %}
           <span class="faint">{{ detail }}</span>
         {% endif %}

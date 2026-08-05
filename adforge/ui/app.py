@@ -154,8 +154,17 @@ async def _form_errors(request: Request, exc: RequestValidationError):
     )
 
 
-def _validate_setting(annotation, raw: str) -> None:
+def _validate_setting(annotation, raw: str, field: str = "") -> None:
     """Raise if `raw` cannot become `annotation`. Mirrors what boot will do."""
+    if field == "timezone":
+        # planner.tz() catches a bad zone and silently returns UTC, so a typo
+        # here shifts every scheduled time by hours while the field goes on
+        # displaying the value the user typed as though it were in force.
+        import zoneinfo
+
+        if raw not in zoneinfo.available_timezones():
+            raise ValueError(f"unknown IANA timezone {raw!r}")
+        return
     if annotation is bool:
         return  # checkboxes are handled separately and are always well-formed
     if annotation in (int, float):
@@ -349,8 +358,6 @@ def _env_safe(value: str) -> str:
     return _ENV_UNSAFE.sub(" ", value).strip()
 
 
-def _flash(request: Request, msg: str, kind: str = "ok") -> None:
-    request.session_flash = (kind, msg)  # type: ignore[attr-defined]
 
 
 @app.on_event("startup")
@@ -851,6 +858,30 @@ def schedules(request: Request):
                 slots += plan_slots(sched, day)
             preview[sched.id] = sorted(slots)[:8]
 
+        # Why an enabled schedule produces no slots. Empty days_of_week or
+        # posts_per_day=0 both save without complaint and both render the same
+        # healthy "N/day" pill, and the only symptom is that "Next slots"
+        # quietly vanishes - which looks identical to every other cause.
+        stalled = {}
+        for sched in rows:
+            if not sched.enabled or preview.get(sched.id):
+                continue
+            if not sched.day_list():
+                stalled[sched.id] = "no days of the week are ticked"
+            elif not int(sched.posts_per_day or 0):
+                stalled[sched.id] = "posts per day is 0"
+            elif not sched.time_list() and not (sched.window_start and sched.window_end):
+                stalled[sched.id] = "no pinned times and no window"
+            else:
+                stalled[sched.id] = "produces no slots"
+        # A schedule with no Account row at all generates posts that can never
+        # publish; the existing warning only covered an account that exists and
+        # is switched off.
+        missing_account = {
+            s_.id for s_ in rows
+            if s_.enabled and not accounts.get((s_.brand, s_.platform))
+        }
+
         # Warn when the schedules together ask for more than the machine can
         # generate. Slots that cannot be filled fail silently - the planner
         # just runs out of time - so the failure looks like "posts stopped
@@ -876,6 +907,7 @@ def schedules(request: Request):
     return templates.TemplateResponse(
         request, "schedules.html",
         ctx(request, schedules=rows, accounts=accounts, preview=preview,
+            stalled=stalled, missing_account=missing_account,
             tz=tz(), capacity=capacity),
     )
 
@@ -989,9 +1021,11 @@ async def account_save(request: Request, account_id: int):
         # take an act that says so. The account is pinned to dry run instead,
         # and the user can then choose LIVE explicitly from the dropdown, which
         # is a decision rather than a side effect.
+        pinned = ""
         if acct.enabled and not was_enabled and acct.dry_run is None \
                 and not settings.dry_run:
             acct.dry_run = True
+            pinned = f"{acct.brand}/{acct.platform}"
             log.warning(
                 "%s/%s enabled while global dry run is off - pinned to dry run; "
                 "set Transmission to LIVE explicitly to publish",
@@ -1032,6 +1066,11 @@ async def account_save(request: Request, account_id: int):
             opts["allowed_for"] = str(opts.get("subreddit", "")) if opts.get("allowed") else ""
 
         acct.options = json.dumps(opts)
+    # The pin is a deliberate safety behaviour, but it silently rewrote a
+    # choice the user had made and reported it only to the server log - so the
+    # dropdown came back reading "dry run" with no explanation.
+    if pinned:
+        return RedirectResponse(f"/accounts?pinned={quote(pinned)}", status_code=303)
     return RedirectResponse("/accounts", status_code=303)
 
 
@@ -1104,9 +1143,8 @@ def radar(request: Request, brand: str = "", min_rel: float = 0.0):
         blockers = []
         need = {"reddit": ("client_id", "client_secret", "username", "password"),
                 "discord": ("bot_token",)}
-        for tgt in targets:
-            if not tgt.enabled:
-                continue
+        enabled_targets = [t_ for t_ in targets if t_.enabled]
+        for tgt in enabled_targets:
             acct = (
                 s.query(Account)
                 .filter_by(brand=tgt.brand, platform=tgt.source)
@@ -1122,14 +1160,19 @@ def radar(request: Request, brand: str = "", min_rel: float = 0.0):
                     f"{tgt.brand}/{tgt.source}: no credentials yet "
                     f"({', '.join(missing)})"
                 )
-            elif not acct.enabled:
-                blockers.append(
-                    f"{tgt.brand}/{tgt.source}: credentials are set but the "
-                    f"account is disabled"
-                )
+            # NOT a blocker: scan_all never consults account.enabled, so a
+            # disabled account scans perfectly well. Reporting it sent the user
+            # to Accounts to fix something that was not stopping anything.
             elif not tgt.keyword_list():
                 blockers.append(f"{tgt.brand}/{tgt.source}: no keywords")
         blockers = sorted(set(blockers))
+        # How many of the enabled targets are actually blocked. The banner used
+        # to say "Nothing will be scanned" whenever this list was non-empty,
+        # which is wrong and alarming when two of three targets are healthy.
+        blocked_n, target_n = len(blockers), len(enabled_targets)
+        # Automatic scanning being off is not a per-target problem, but it is
+        # the reason a user who waits for the next pass waits forever.
+        auto_off = not settings.radar_enabled
         drafts = {}
         for t in threads:
             d = (
@@ -1143,7 +1186,8 @@ def radar(request: Request, brand: str = "", min_rel: float = 0.0):
     return templates.TemplateResponse(
         request, "radar.html",
         ctx(request, threads=threads, targets=targets, drafts=drafts,
-            blockers=blockers,
+            blockers=blockers, blocked_n=blocked_n, target_n=target_n,
+            auto_off=auto_off,
             f_brand=brand, f_min=min_rel),
     )
 
@@ -1179,6 +1223,19 @@ def radar_target_new(
         log.info("sitewide target %r: ignoring the rules-read tick", cleaned)
 
     with session_scope() as s:
+        # Two identical cards are indistinguishable on screen and double both
+        # the scan work and the platform's rate-limit budget for no benefit.
+        dupe = (s.query(RadarTarget)
+                 .filter(RadarTarget.brand == brand,
+                         RadarTarget.source == source,
+                         RadarTarget.target == cleaned)
+                 .first())
+        if dupe:
+            raise HTTPException(
+                400,
+                f"{brand}/{source} already has a target for {cleaned!r} "
+                f"(#{dupe.id}). Edit that one instead - a second copy would "
+                f"scan the same thing twice and spend twice the rate limit.")
         s.add(RadarTarget(
             brand=brand, source=source, target=cleaned,
             keywords=keywords, enabled=True,
@@ -1205,9 +1262,14 @@ def radar_target_save(
         if delete:
             s.delete(t)
         else:
+            from ..radar.scan import is_sitewide
+
             t.keywords = keywords
             t.enabled = bool(enabled)
-            t.promo_allowed = bool(promo_allowed)
+            # The create form refuses this tick on a sitewide target; the edit
+            # form did not, so the flag could be set afterwards and the card
+            # then rendered a rules-read promise nobody could have made.
+            t.promo_allowed = bool(promo_allowed) and not is_sitewide(t.target)
             t.rules_note = rules_note
             t.min_relevance = min_relevance
     return RedirectResponse("/radar", status_code=303)
@@ -1511,8 +1573,11 @@ async def settings_save(request: Request):
         raw = str(value)
         if field in fields:
             try:
-                _validate_setting(fields[field].annotation, raw)
-            except (TypeError, ValueError):
+                _validate_setting(fields[field].annotation, raw, field)
+            except ValueError as e:
+                rejected.append(f"{field}: {e}")
+                continue
+            except TypeError:
                 rejected.append(
                     f"{field}: {raw!r} is not a valid "
                     f"{getattr(fields[field].annotation, '__name__', 'value')}")

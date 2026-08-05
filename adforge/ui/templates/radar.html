@@ -39,9 +39,21 @@
      which its ToS forbids and which gets the account terminated.</p>
 </div>
 
+{% if auto_off %}
+<div class="note warn">
+  <p><strong>Automatic scanning is off.</strong> Only the "Scan now" button will
+     run a pass — nothing happens on a timer. Turn it on under Radar on
+     <a href="/settings">Settings</a>.</p>
+</div>
+{% endif %}
+
 {% if blockers %}
-<div class="note bad">
-  <p><strong>Nothing will be scanned.</strong> Every enabled target is blocked:</p>
+<div class="note {{ 'bad' if blocked_n == target_n else 'warn' }}">
+  <p><strong>
+    {% if blocked_n == target_n %}Nothing will be scanned.
+       All {{ target_n }} enabled target(s) are blocked:
+    {% else %}{{ blocked_n }} of {{ target_n }} enabled targets are blocked:
+    {% endif %}</strong></p>
   <ul style="margin:6px 0 0; padding-left:18px">
     {% for b in blockers %}<li>{{ b }}</li>{% endfor %}
   </ul>
@@ -82,10 +94,17 @@
       <label class="inline">
         <input type="checkbox" name="enabled" {{ 'checked' if t.enabled }}> Scanning
       </label>
+      {% if target_label(t.target, t.source).startswith('every') %}
+        <div class="hint">Links are never attached to hits found this way — you
+          cannot have read the rules of every community. Add a specific
+          {{ 'subreddit' if t.source == 'reddit' else 'channel' }} as its own
+          target to allow them there.</div>
+      {% else %}
       <label class="inline">
         <input type="checkbox" name="promo_allowed" {{ 'checked' if t.promo_allowed }}>
         Links permitted here
       </label>
+      {% endif %}
       <div class="row" style="margin-top:8px">
         <button class="sm primary">Save</button>
         <button class="sm danger" name="delete" value="1"
@@ -254,8 +273,14 @@
 </div>
 {% else %}
   <div class="card"><p class="faint">
-    No threads found yet. Add a target above and hit <em>Scan now</em>. The
-    scanner also runs every {{ settings.radar_interval_minutes }} minutes.
+    No threads found yet. Add a target above and hit <em>Scan now</em>.
+    {% if settings.radar_enabled %}
+      The scanner also runs every {{ settings.radar_interval_minutes }} minutes.
+    {% else %}
+      <strong>Automatic scanning is off</strong>, so nothing will appear here
+      until you press that button or enable it on
+      <a href="/settings">Settings</a>.
+    {% endif %}
   </p></div>
 {% endfor %}
 {% endblock %}

@@ -5,6 +5,17 @@
   <div>
     <h1>Posting schedules</h1>
     <p class="sub">How often, which days, what times — per brand, per platform.</p>
+
+{% if settings.ui_runs_scheduler %}
+<div class="note">
+  <p><strong>This runs on its own.</strong> While AdForge is open, planning runs
+     automatically every hour and publishing is attempted <strong>every
+     minute</strong>. The two buttons below only run those early — they are not
+     the only thing that makes posts happen.</p>
+  <p>Nothing reaches a platform unless an account is both enabled and out of dry
+     run; the badge in the top-right shows which mode you are in right now.</p>
+</div>
+{% endif %}
   </div>
   <div class="right">
     <form method="post" action="/schedules/plan-now">
@@ -53,7 +64,12 @@
     {% else %}
       <span class="pill muted">off</span>
     {% endif %}
-    {% if acct and not acct.enabled %}
+    {% if sched.id in stalled %}
+      <span class="pill bad" title="{{ stalled[sched.id] }} — this schedule is enabled but will never fire.">never fires</span>
+    {% endif %}
+    {% if sched.id in missing_account %}
+      <span class="pill bad" title="There is no account row for this brand and platform, so generated posts could never publish.">no account</span>
+    {% elif acct and not acct.enabled %}
       <span class="pill warn" title="The schedule will generate posts but nothing can publish until the account is enabled.">account disabled</span>
     {% endif %}
     <span class="right faint">{{ sched.times or (sched.window_start ~ '–' ~ sched.window_end) }}</span>

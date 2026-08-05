@@ -8,6 +8,7 @@ minimum-dimension scoring. All offline.
 from __future__ import annotations
 
 import json
+import pathlib
 
 import pytest
 
@@ -478,3 +479,46 @@ def test_settings_refuses_a_value_that_would_stop_the_next_boot():
     _validate_setting(int, "42")
     _validate_setting(float, "0.6")
     _validate_setting(str, "anything at all")
+
+
+def test_a_mistyped_timezone_is_refused_not_silently_utc():
+    """planner.tz() falls back to UTC on a bad zone.
+
+    The field went on displaying what was typed, so every scheduled time
+    shifted by hours with nothing on screen admitting it.
+    """
+    import pytest
+
+    from adforge.ui.app import _validate_setting
+
+    with pytest.raises(ValueError):
+        _validate_setting(str, "America/New_Yrok", "timezone")
+    with pytest.raises(ValueError):
+        _validate_setting(str, "EST5", "timezone")
+    _validate_setting(str, "America/New_York", "timezone")
+    _validate_setting(str, "UTC", "timezone")
+
+
+def test_a_sitewide_target_cannot_be_marked_links_allowed():
+    """The create form refused this tick; the edit form did not.
+
+    scan.py forces links off for sitewide hits anyway, but storing the flag
+    records a rules-read promise nobody could have made, and it would become
+    load-bearing the moment that scan logic changed.
+    """
+    import re
+
+    src = pathlib.Path("adforge/ui/app.py").read_text()
+    save = src.split("def radar_target_save", 1)[1].split("\n@app.", 1)[0]
+    assert re.search(r"promo_allowed\s*=\s*bool\(promo_allowed\)\s*and\s*not\s*is_sitewide",
+                     save), "radar_target_save can still set promo_allowed on a sitewide target"
+
+
+def test_dead_flash_helper_is_gone():
+    """It wrote to a request attribute that no middleware or template read.
+
+    Left in place it reads as a working notification mechanism, which is why
+    several handlers had no way to say what they had done.
+    """
+    src = pathlib.Path("adforge/ui/app.py").read_text()
+    assert "session_flash" not in src
