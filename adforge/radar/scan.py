@@ -338,6 +338,20 @@ def scan_discord(session, target: RadarTarget, creds: dict) -> int:
             relevance = min(relevance, 0.35)
 
         author = (msg.get("author") or {}).get("username", "?")
+        # promo/note were read below but never assigned in this function: a
+        # NameError on the first matching message, swallowed by scan_all's
+        # except clause. The Discord radar therefore reported a clean scan of
+        # zero threads, forever, and had never stored one.
+        #
+        # Same rule as Reddit: a hit from a wildcard target is in a channel
+        # whose rules nobody has read, so it carries no link.
+        wildcard = is_sitewide(target.target)
+        promo = bool(target.promo_allowed) and not wildcard
+        note = target.rules_note or ""
+        if wildcard:
+            note = ("wildcard hit; this server's rules were not reviewed - "
+                    "links suppressed")
+
         session.add(
             RadarThread(
                 brand=target.brand,

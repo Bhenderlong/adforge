@@ -121,6 +121,11 @@ input:focus, select:focus, textarea:focus {
 }
 .field { margin-bottom: 10px; }
 .hint { color: var(--faint); font-size: 11px; margin-top: 3px; }
+/* Deliberately NOT named .bad/.warn: those already exist as modifiers on
+   .note and .pill, which set only a border or background. A bare colour rule
+   under those names would repaint the body text of every note on the site. */
+.txt-bad  { color: var(--bad); }
+.txt-warn { color: var(--warn); }
 /* The gotcha under a credential field - the thing that silently costs an hour
    if missed, so it must not read as more grey small print. */
 .hint.warn { color: var(--warn); border-left: 2px solid var(--warn);

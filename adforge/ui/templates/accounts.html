@@ -4,6 +4,15 @@
 <h1>Accounts</h1>
 <p class="sub">Official platform APIs only. Credentials stay on this machine.</p>
 
+{% set q = request.query_params %}
+{% if q.get('cleared') %}
+<div class="note"><p><strong>Deleted {{ q.get('cleared') }}</strong> from
+   {{ q.get('on') }}.</p></div>
+{% elif q.get('was-not-set') %}
+<div class="note warn"><p><strong>Nothing to delete.</strong>
+   {{ q.get('was-not-set') }} was not set on {{ q.get('on') }}.</p></div>
+{% endif %}
+
 <div class="note">
   <p>Everything is <strong>off and dry-run by default</strong>. An account only
      transmits once you enable it <em>and</em> turn its dry-run off (or turn off
@@ -93,6 +102,16 @@
             {% endif %}
           </div>
           {% if gotcha %}<div class="hint warn">{{ gotcha }}</div>{% endif %}
+          {% if creds[acct.id].get(field) %}
+            {# formaction: this button lives inside the account form but must
+               reach a different endpoint. Blanking the input cannot delete a
+               credential - blank means "keep", so without this there is no way
+               to remove one at all. #}
+            <button class="sm danger" type="submit" name="name" value="{{ field }}"
+                    formaction="/accounts/{{ acct.id }}/clear-credential"
+                    onclick="return confirm('Delete the stored {{ field }}?')">
+              Clear</button>
+          {% endif %}
         </div>
         {% endfor %}
 
@@ -107,11 +126,22 @@
               {%- if creds[acct.id].get(field) %}<br>Stored. Leave blank to keep
                 it; type to replace.{% endif %}</div>
             {% if gotcha %}<div class="hint warn">{{ gotcha }}</div>{% endif %}
+            {% if creds[acct.id].get(field) %}
+              <button class="sm danger" type="submit" name="name" value="{{ field }}"
+                      formaction="/accounts/{{ acct.id }}/clear-credential"
+                      onclick="return confirm('Delete the stored {{ field }}?')">
+                Clear</button>
+            {% endif %}
           </div>
           {% endfor %}
           <div class="hint" style="grid-column:1/-1">
             A webhook is enough to post announcements. The bot token is only
             needed if you want the radar to read and reply in channels.
+            {% if creds[acct.id].get('webhook_url') and creds[acct.id].get('bot_token') %}
+              <span class="txt-warn"><strong>Both are set, so posts go through the
+              webhook</strong> and the bot token is used only for radar replies.
+              Clear the webhook if you want everything to go through the bot.</span>
+            {% endif %}
           </div>
         {% endif %}
       </div>
@@ -176,20 +206,13 @@
         </div>
       {% endif %}
 
-      {% if acct.platform == 'instagram' %}
-        <h3 style="margin-top:16px">Media hosting</h3>
-        <div class="field">
-          <label>public_media_base</label>
-          <input type="text" name="cred_public_media_base"
-                 value="{{ creds[acct.id].get('public_media_base', '') }}"
-                 placeholder="https://s.inferix.co/adforge">
-          <div class="hint">
-            Instagram's API cannot accept a file upload — Meta's servers fetch
-            the media themselves, so this must be a public HTTPS URL serving
-            <code class="mono">data/assets/</code>. localhost will not work.
-          </div>
-        </div>
-      {% endif %}
+      {# The "Media hosting" block that used to be here rendered a SECOND
+         input named cred_public_media_base, while the required-credentials
+         loop above already renders one. Starlette's FormData.items()
+         de-duplicates and keeps the LAST value, so whatever was typed in the
+         top field was discarded on save and the field kept reporting "not
+         set" - on the one platform where that credential is mandatory. The
+         surviving field carries the same guidance via credhelp. #}
 
       {% if acct.platform == 'youtube' %}
         <div class="note warn" style="margin-top:12px">

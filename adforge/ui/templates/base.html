@@ -27,11 +27,16 @@
 </nav>
 
 <main>
+<div id="jobresult" class="note hidden"><p id="jobresulttext"></p></div>
 {% block body %}{% endblock %}
 </main>
 
 <div id="jobbar" class="jobbar hidden">
-  <strong>Running</strong> <span id="joblist"></span>
+  <span id="jobrunning" class="hidden"><strong>Running</strong>
+    <span id="joblist"></span></span>
+  <span id="jobfailed" class="hidden"><strong class="txt-bad">Failed</strong>
+    <span id="faillist"></span>
+    <button class="sm" onclick="clearJobs()">Dismiss</button></span>
 </div>
 
 <script>
@@ -49,19 +54,73 @@ async function poll() {
       pill.textContent = 'GPU ' + used + (d.gpu_mode ? ' · ' + d.gpu_mode : '');
       pill.className = 'pill ' + (d.vram.some(g => g.pct > 90) ? 'warn' : 'muted');
     }
-    const running = (d.jobs || []).filter(j => j.state === 'running');
+    const jobs = d.jobs || [];
+    const running = jobs.filter(j => j.state === 'running');
+    // Failures were previously filtered out along with everything non-running,
+    // so a generation that threw looked exactly like one that finished: the
+    // bar simply disappeared. The error only existed in the log.
+    const failed = jobs.filter(j => j.state === 'failed');
     const bar = document.getElementById('jobbar');
-    if (running.length) {
-      document.getElementById('joblist').textContent =
-        running.map(j => j.name).join(', ');
-      bar.classList.remove('hidden');
-    } else {
-      bar.classList.add('hidden');
-    }
+    const runSpan = document.getElementById('jobrunning');
+    const failSpan = document.getElementById('jobfailed');
+
+    document.getElementById('joblist').textContent =
+      running.map(j => j.name).join(', ');
+    runSpan.classList.toggle('hidden', !running.length);
+
+    document.getElementById('faillist').textContent = failed
+      .map(j => j.name + (j.detail ? ' — ' + j.detail : '')).join('; ');
+    failSpan.classList.toggle('hidden', !failed.length);
+
+    bar.classList.toggle('hidden', !running.length && !failed.length);
   } catch (e) { /* transient; next tick retries */ }
 }
 poll();
 setInterval(poll, 4000);
+
+// Drops only finished and failed records; running and queued jobs survive.
+async function clearJobs() {
+  await fetch('/api/jobs/clear', { method: 'POST' });
+  poll();
+}
+
+// Report the outcome of a job we were redirected here to watch.
+//
+// Every button that dispatches work redirects with ?job=<id>. The work runs on
+// the pool, so the outcome cannot be in the response - which is why these
+// buttons used to return a byte-identical page whether they had done something
+// or nothing at all. This watches the one job we were sent to watch and says
+// what happened, on whichever page the redirect landed on.
+async function watchJob() {
+  const id = new URLSearchParams(location.search).get('job');
+  if (!id) return;
+  const box = document.getElementById('jobresult');
+  const txt = document.getElementById('jobresulttext');
+  box.classList.remove('hidden');
+  for (let i = 0; i < 900; i++) {          // ~30 min ceiling; a Wan render is slow
+    let job;
+    try {
+      const r = await fetch('/api/jobs');
+      job = (await r.json()).find(j => j.id === id);
+    } catch (e) { /* transient */ }
+    if (!job) { txt.textContent = 'That job is no longer being tracked.'; return; }
+    if (job.state === 'done') {
+      box.className = 'note';
+      txt.innerHTML = '<strong>' + job.name + '</strong> — ' +
+                      (job.detail || 'finished');
+      return;
+    }
+    if (job.state === 'failed') {
+      box.className = 'note bad';
+      txt.innerHTML = '<strong>' + job.name + ' failed</strong> — ' +
+                      (job.detail || 'no detail recorded');
+      return;
+    }
+    txt.textContent = job.name + ' is ' + job.state + '…';
+    await new Promise(r => setTimeout(r, 2000));
+  }
+}
+watchJob();
 
 // Character counters for any textarea declaring a limit.
 document.querySelectorAll('textarea[data-limit]').forEach(function (ta) {

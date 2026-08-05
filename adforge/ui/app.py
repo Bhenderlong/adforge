@@ -20,7 +20,7 @@ import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
@@ -111,6 +111,7 @@ async def _same_origin_only(request: Request, call_next):
 
 
 from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 
 @app.exception_handler(RequestValidationError)
@@ -153,6 +154,44 @@ async def _form_errors(request: Request, exc: RequestValidationError):
     )
 
 
+def _validate_setting(annotation, raw: str) -> None:
+    """Raise if `raw` cannot become `annotation`. Mirrors what boot will do."""
+    if annotation is bool:
+        return  # checkboxes are handled separately and are always well-formed
+    if annotation in (int, float):
+        annotation(raw)  # raises ValueError on '' or 'abc'
+    # str and anything else: pydantic accepts it, so we do too.
+
+
+def _error_page(request: Request, title: str, detail: str, code: int) -> HTMLResponse:
+    return HTMLResponse(
+        "<!doctype html><meta charset=utf-8>"
+        "<style>body{font:15px system-ui;background:#0b0f14;color:#e2e8f0;"
+        "padding:2.5rem;max-width:44rem}a{color:#06b6d4}</style>"
+        f"<h2>{title}</h2><p>{detail}</p>"
+        f'<p><a href="{request.headers.get("referer", "/")}">Back</a></p>',
+        status_code=code,
+    )
+
+
+@app.exception_handler(StarletteHTTPException)
+async def _http_errors(request: Request, exc: StarletteHTTPException):
+    """Same treatment for raised HTTPExceptions as for validation errors.
+
+    These are deliberate, well-worded refusals - "this post has no enabled
+    account", "401 chars exceeds the X limit of 280" - and every one of them
+    was being delivered as a raw JSON body that replaced the page the user was
+    working in. The message was already right; only the presentation destroyed
+    the context needed to act on it.
+    """
+    if "text/html" not in request.headers.get("accept", ""):
+        return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
+    titles = {400: "That could not be done", 404: "Not found",
+              403: "Refused", 409: "Conflicting change"}
+    return _error_page(request, titles.get(exc.status_code, "Something went wrong"),
+                       str(exc.detail), exc.status_code)
+
+
 app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
 templates = Jinja2Templates(directory=HERE / "templates")
 
@@ -192,6 +231,33 @@ def _target_label(target: str, source: str) -> str:
 templates.env.filters["localtime"] = _localtime
 templates.env.globals["target_label"] = _target_label
 templates.env.globals["cred_help"] = credhelp.help_for
+
+
+def _slot_age(value) -> tuple[str, str]:
+    """('ok'|'overdue'|'expired', human phrase) for a scheduled time.
+
+    The queue listed these under "Coming up" with a bare "04 Aug 06:26" - no
+    year, no relative cue - so a slot 36 hours past its time looked exactly
+    like one due this evening. Approving it appeared to work and then the next
+    tick rejected it for staleness, which reads as the app losing the post.
+    """
+    from ..scheduler.engine import MAX_SLOT_AGE_HOURS
+
+    if value is None:
+        return "ok", ""
+    if getattr(value, "tzinfo", None) is None:
+        value = value.replace(tzinfo=dt.timezone.utc)
+    hours = (utcnow() - value).total_seconds() / 3600
+    if hours <= 0:
+        return "ok", ""
+    if hours > MAX_SLOT_AGE_HOURS:
+        return "expired", (
+            f"{hours:.0f}h past its slot (limit {MAX_SLOT_AGE_HOURS}h) - "
+            f"publishing will reject this; move the time forward or regenerate")
+    return "overdue", f"{hours:.0f}h past its slot"
+
+
+templates.env.globals["slot_age"] = _slot_age
 
 
 # Bounded: two concurrent jobs already saturate the GPU lock, and a deeper
@@ -433,7 +499,14 @@ def queue(request: Request, brand: str = "", platform: str = "", status: str = "
         if platform:
             q = q.filter(Post.platform == platform)
         if status:
-            q = q.filter(Post.status == PostStatus(status))
+            # An unknown value used to raise ValueError out of the handler and
+            # render a 500 for what is only ever a hand-edited query string.
+            try:
+                q = q.filter(Post.status == PostStatus(status))
+            except ValueError:
+                raise HTTPException(
+                    400, f"{status!r} is not a post status. Valid values: "
+                         + ", ".join(p.value for p in PostStatus)) from None
         posts = q.order_by(Post.scheduled_for.desc().nullslast(),
                            Post.id.desc()).limit(200).all()
         counts = _status_counts(s)
@@ -666,11 +739,24 @@ def compose_submit(
     with_media: str = Form(""),
     when: str = Form(""),
 ):
-    _job(
+    # Validate BEFORE dispatching. The select lists every brand's pillars in
+    # optgroups, so picking the wrong brand's pillar is a click away - and it
+    # used to raise ValueError inside the worker, where the only trace was a
+    # job record on a different page than the one you were redirected to.
+    if pillar:
+        try:
+            get_brand(brand).pillar(pillar)
+        except ValueError:
+            valid = ", ".join(p.key for p in get_brand(brand).pillars)
+            raise HTTPException(
+                400, f"{pillar!r} is not a pillar of {brand}. Its pillars are: "
+                     f"{valid}. The dropdown lists both brands' pillars, so "
+                     f"check the brand selected above it.") from None
+    jid = _job(
         f"compose:{brand}/{platform}",
         _compose_job, brand, platform, pillar, angle, bool(with_media), when,
     )
-    return RedirectResponse("/queue", status_code=303)
+    return RedirectResponse(f"/queue?job={quote(jid)}", status_code=303)
 
 
 def _compose_job(brand_key, platform, pillar_key, angle, with_media, when) -> str:
@@ -799,16 +885,35 @@ def schedules(request: Request):
 # {sched_id} above, "plan-now" and "tick" were parsed as ids and both buttons
 # returned "Input should be a valid integer" instead of doing anything. Neither
 # had ever worked. test_no_shadowed_routes guards the ordering.
+def _plan_ahead_described() -> str:
+    n = plan_ahead()
+    if n:
+        return f"created {n} post(s)"
+    return ("created nothing - every schedule is disabled, already filled for "
+            "its window, or capped for today")
+
+
+def _tick_described() -> str:
+    promoted, published = promote_and_publish()
+    if not promoted and not published:
+        return "nothing was due"
+    return f"promoted {promoted}, published {published}"
+
+
 @app.post("/schedules/plan-now")
 def schedule_plan_now():
-    _job("plan", plan_ahead)
-    return RedirectResponse("/schedules", status_code=303)
+    # Both of these return the job id in the query string. The work happens on
+    # the pool, so the outcome is not known at redirect time - without this the
+    # button returned an identical page and "created 5 posts" and "created
+    # nothing because everything is disabled" were the same screen.
+    jid = _job("plan", _plan_ahead_described)
+    return RedirectResponse(f"/schedules?job={quote(jid)}", status_code=303)
 
 
 @app.post("/schedules/tick")
 def schedule_tick():
-    _job("publish-tick", promote_and_publish)
-    return RedirectResponse("/queue", status_code=303)
+    jid = _job("publish-tick", _tick_described)
+    return RedirectResponse(f"/queue?job={quote(jid)}", status_code=303)
 
 
 # ---------------------------------------------------------------------------
@@ -937,9 +1042,15 @@ def account_clear_credential(account_id: int, name: str = Form(...)):
         if not acct:
             raise HTTPException(404, "no such account")
         creds = acct.creds()
-        creds.pop(name, None)
+        existed = creds.pop(name, None) is not None
         acct.credentials = json.dumps(creds)
-    return RedirectResponse("/accounts", status_code=303)
+        label = f"{acct.brand}/{acct.platform}"
+    # Say what happened. A bare redirect back to an identical page is the
+    # failure mode this whole endpoint was unreachable behind: deleting a
+    # credential and deleting nothing looked exactly the same.
+    outcome = "cleared" if existed else "was-not-set"
+    return RedirectResponse(
+        f"/accounts?{outcome}={quote(name)}&on={quote(label)}", status_code=303)
 
 
 @app.post("/accounts/{account_id}/test")
@@ -1112,8 +1223,26 @@ def radar_scan_now():
 
 @app.post("/radar/thread/{thread_id}/draft")
 def radar_draft(thread_id: int):
-    _job(f"draft#{thread_id}", _draft_job, thread_id)
-    return RedirectResponse("/radar", status_code=303)
+    # min_relevance was stored, rendered and editable but read by nothing -
+    # the module docstring claimed it gated drafting and it did not. Enforce
+    # the documented behaviour here, where the click happens, so the number
+    # does what the label says.
+    with session_scope() as s:
+        thread = s.get(RadarThread, thread_id)
+        if not thread:
+            raise HTTPException(404, "no such thread")
+        target = (s.query(RadarTarget)
+                   .filter(RadarTarget.brand == thread.brand,
+                           RadarTarget.source == thread.source)
+                   .first())
+        if target and thread.relevance < target.min_relevance:
+            raise HTTPException(
+                400,
+                f"This thread scored {thread.relevance:.2f}, below the "
+                f"{target.min_relevance:.2f} minimum relevance set on its "
+                f"target. Lower that threshold if you want to reply here.")
+    jid = _job(f"draft#{thread_id}", _draft_job, thread_id)
+    return RedirectResponse(f"/radar?job={quote(jid)}", status_code=303)
 
 
 def _draft_job(thread_id: int) -> str:
@@ -1365,11 +1494,41 @@ async def settings_save(request: Request):
                 k, v = line.split("=", 1)
                 existing[k.strip()] = v.strip()
 
+    # Validate against the Settings field types BEFORE writing. `settings =
+    # Settings()` runs at import, so an unparseable value here does not
+    # produce a bad setting - it stops the process from starting at all, on
+    # the next restart, after this page has said "Saved." Clearing a number
+    # box is enough to do it: an empty string is not an int.
+    from ..config import Settings
+
+    fields = Settings.model_fields
+    rejected = []
+    staged = {}
     for key, value in form.items():
         if not key.startswith("set_"):
             continue
-        name = f"ADFORGE_{key[4:].upper()}"
-        existing[name] = _env_safe(str(value))
+        field = key[4:]
+        raw = str(value)
+        if field in fields:
+            try:
+                _validate_setting(fields[field].annotation, raw)
+            except (TypeError, ValueError):
+                rejected.append(
+                    f"{field}: {raw!r} is not a valid "
+                    f"{getattr(fields[field].annotation, '__name__', 'value')}")
+                continue
+        staged[f"ADFORGE_{field.upper()}"] = _env_safe(raw)
+
+    if rejected:
+        return _error_page(
+            request, "Nothing was saved",
+            "These values were refused, so the whole form was left alone "
+            "rather than saving it half-applied: <br><br>"
+            + "<br>".join(rejected)
+            + "<br><br>An unparseable setting does not merely misbehave - it "
+              "stops AdForge starting next time, which is why this refuses "
+              "instead of writing it.", 400)
+    existing.update(staged)
 
     # Checkboxes are absent from the form when unticked, so each one carries a
     # hidden `bool_<name>_present` companion. The companion marks that the

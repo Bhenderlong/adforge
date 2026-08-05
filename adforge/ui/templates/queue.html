@@ -65,6 +65,11 @@
       </td>
       <td class="faint mono">
         {{ p.scheduled_for|localtime or '—' }}
+        {%- set state, why = slot_age(p.scheduled_for) %}
+        {%- if state != 'ok' %}
+          <br><span class="pill {{ 'bad' if state == 'expired' else 'warn' }}"
+                title="{{ why }}">{{ state }}</span>
+        {%- endif %}
         {% if p.review_until and p.status.value == 'REVIEW' %}
           <br><span title="Auto-approves at this time">⏱ {{ p.review_until|localtime('%H:%M') }}</span>
         {% endif %}
@@ -108,7 +113,13 @@
     </tr>
   {% else %}
     <tr><td colspan="7" class="faint">
-      Nothing here yet. Enable a schedule or use <a href="/compose">Compose</a>.
+      {% if f_brand or f_platform or f_status %}
+        No posts match these filters{% if counts.values()|sum %} — there are
+        {{ counts.values()|sum }} posts in total{% endif %}.
+        <a href="/queue">Clear filters</a>.
+      {% else %}
+        Nothing here yet. Enable a schedule or use <a href="/compose">Compose</a>.
+      {% endif %}
     </td></tr>
   {% endfor %}
   </tbody>

@@ -97,7 +97,12 @@
         <tbody>
         {% for p in upcoming %}
           <tr>
-            <td class="faint mono">{{ p.scheduled_for|localtime or '—' }}</td>
+            <td class="faint mono">{{ p.scheduled_for|localtime or '—' }}
+              {%- set state, why = slot_age(p.scheduled_for) %}
+              {%- if state != 'ok' %}
+                <br><span class="pill {{ 'bad' if state == 'expired' else 'warn' }}"
+                      title="{{ why }}">{{ state }}</span>
+              {%- endif %}</td>
             <td><span class="faint">{{ p.brand }}</span><br>{{ p.platform }}</td>
             <td class="truncate">{{ p.body[:130] }}</td>
             <td>

@@ -101,6 +101,11 @@
         <label>Scheduled for <span class="faint">(local time)</span></label>
         <input type="datetime-local" name="scheduled_for"
                value="{{ post.scheduled_for|localtime('%Y-%m-%dT%H:%M') }}">
+        {% set state, why = slot_age(post.scheduled_for) %}
+        {% if state != 'ok' %}
+          <div class="hint {{ 'warn' if state == 'expired' }}">{{ why }}.</div>
+        {% endif %}
+        <div class="hint">Blank keeps the current time rather than unscheduling.</div>
       </div>
 
       <button class="primary" type="submit">Save changes</button>
@@ -159,7 +164,10 @@
       <p class="hint">
         {% if account %}
           Destination: <strong>{{ account.handle or account.platform }}</strong> —
-          {% if account.dry_run is none %}
+          {% if not account.enabled %}
+            <span class="txt-warn">account is DISABLED, so nothing can publish
+            to it. Enable it on <a href="/accounts">Accounts</a> first.</span>
+          {% elif account.dry_run is none %}
             inheriting global {{ 'DRY RUN' if settings.dry_run else 'LIVE' }}
           {% elif account.dry_run %}dry run{% else %}<strong>live</strong>{% endif %}
         {% else %}

@@ -419,3 +419,62 @@ def test_the_credential_gotchas_that_cost_an_hour_are_stated():
     # A webhook cannot read, so the radar cannot run on one.
     assert "READ" in help_for("discord", "webhook_url")[1]
     assert "MESSAGE CONTENT" in help_for("discord", "bot_token")[1]
+
+
+def test_discord_scan_can_build_a_thread_row():
+    """scan_discord read `promo` and `note` without ever assigning them.
+
+    The NameError fired on the first matching message and scan_all's blanket
+    except swallowed it, so the Discord radar reported a clean scan of zero
+    threads and had never stored one.
+    """
+    import inspect
+
+    from adforge.radar import scan
+
+    src = inspect.getsource(scan.scan_discord)
+    body = src.split("session.add(", 1)[0]
+    for var in ("promo", "note", "wildcard"):
+        assert f"{var} =" in body, f"{var} is used but never assigned before session.add"
+
+
+def test_no_template_form_has_two_inputs_of_the_same_name():
+    """Starlette's FormData.items() keeps the LAST duplicate.
+
+    Instagram's public_media_base was rendered twice in one form, so whatever
+    was typed in the first box was discarded on save - on the one platform
+    where that credential is mandatory.
+    """
+    import pathlib
+    import re
+    from collections import Counter
+
+    # Only one arm of an {% if %}/{% else %} ever renders, so drop the else
+    # arms before counting - otherwise post_detail's title field, which is a
+    # text input on Reddit and a hidden one everywhere else, reads as a
+    # duplicate. Names containing {{ }} are loop-generated and skipped below.
+    else_arm = re.compile(r"{%-?\s*else\s*-?%}.*?(?={%-?\s*endif)", re.S)
+
+    for tpl in sorted(pathlib.Path("adforge/ui/templates").glob("*.html")):
+        text = else_arm.sub("", tpl.read_text())
+        for form in re.findall(r"<form\b.*?</form>", text, re.S):
+            names = re.findall(r'<(?:input|select|textarea)\b[^>]*\bname="([^"]+)"',
+                               form)
+            names = [n for n in names if "{{" not in n and not n.startswith("bool_")]
+            dupes = {n: c for n, c in Counter(names).items() if c > 1}
+            assert not dupes, f"{tpl.name}: duplicate field name(s) {dupes}"
+
+
+def test_settings_refuses_a_value_that_would_stop_the_next_boot():
+    from adforge.ui.app import _validate_setting
+
+    for bad in ("", "abc", "1.2.3"):
+        try:
+            _validate_setting(int, bad)
+        except (TypeError, ValueError):
+            pass
+        else:
+            raise AssertionError(f"{bad!r} accepted as an int")
+    _validate_setting(int, "42")
+    _validate_setting(float, "0.6")
+    _validate_setting(str, "anything at all")

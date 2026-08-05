@@ -444,6 +444,14 @@ def test_every_form_posts_to_a_real_route():
 
     broken = []
     for tpl in sorted(pathlib.Path("adforge/ui/templates").glob("*.html")):
+        # formaction= on a button overrides its form's action, so it is a
+        # route reference the <form ...> scan below cannot see. The Clear
+        # button on Accounts uses one, and shipped uncovered by this test.
+        for m in re.finditer(r'formaction="([^"]*)"', tpl.read_text()):
+            url = _concretise(m.group(1))
+            if not _resolves(url, "POST"):
+                broken.append(f"{tpl.name}: POST {url} (formaction) resolves to nothing")
+
         for m in re.finditer(r"<form\b([^>]*)>", tpl.read_text()):
             attrs = m.group(1)
             action = re.search(r'action="([^"]*)"', attrs)
