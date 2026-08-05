@@ -170,7 +170,26 @@ def _localtime(value, fmt: str = "%d %b %H:%M") -> str:
     return value.astimezone(tz()).strftime(fmt)
 
 
+def _target_label(target: str, source: str) -> str:
+    """How a radar target is named on screen.
+
+    The template used to print 'r/' ~ target unconditionally, which rendered a
+    sitewide target as "r/all". That reads as one literal subreddit, and it
+    caused exactly that misreading in practice - a scan that had actually been
+    skipped for missing credentials was diagnosed as "it is only searching
+    r/all". Sitewide is a different kind of thing from a subreddit and is now
+    named as one.
+    """
+    from ..radar.scan import is_sitewide  # imported lazily, as elsewhere here
+
+    if is_sitewide(target):
+        return ("everywhere on Reddit" if source == "reddit"
+                else "every channel the bot can read")
+    return f"r/{target}" if source == "reddit" else target
+
+
 templates.env.filters["localtime"] = _localtime
+templates.env.globals["target_label"] = _target_label
 
 
 # Bounded: two concurrent jobs already saturate the GPU lock, and a deeper

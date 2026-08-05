@@ -365,3 +365,22 @@ def test_radar_page_explains_why_a_scan_would_find_nothing(tmp_path):
     assert "Nothing will be scanned" in body
     assert "no credentials yet" in body
     assert "client_id" in body
+
+
+def test_a_sitewide_target_is_not_labelled_like_a_subreddit():
+    """"r/all" reads as one subreddit and was misread as one in practice.
+
+    The bug this guards is not cosmetic: a scan skipped for missing credentials
+    was diagnosed as "it is only searching r/all", because that is what the page
+    said it was targeting.
+    """
+    from adforge.ui.app import _target_label
+
+    for value in ("all", "*", "sitewide", "r/all", "ALL"):
+        label = _target_label(value, "reddit")
+        assert not label.startswith("r/"), f"{value!r} rendered as {label!r}"
+        assert "everywhere" in label
+
+    assert _target_label("*", "discord") == "every channel the bot can read"
+    # A real subreddit must still be shown the normal way.
+    assert _target_label("LocalLLaMA", "reddit") == "r/LocalLLaMA"

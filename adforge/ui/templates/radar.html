@@ -58,7 +58,7 @@
   <div class="card">
     <form method="post" action="/radar/targets/{{ t.id }}">
       <div class="row">
-        <strong>{{ 'r/' ~ t.target if t.source == 'reddit' else t.target }}</strong>
+        <strong>{{ target_label(t.target, t.source) }}</strong>
         <span class="pill muted">{{ t.source }}</span>
         <span class="pill info">{{ t.brand }}</span>
         {% if not t.enabled %}<span class="pill muted">paused</span>{% endif %}
