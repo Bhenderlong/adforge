@@ -123,4 +123,8 @@ Answer honestly, because the source is linked and the two scopes differ:
 
 ## Contact
 
-(email on the form) inferix.co, vallorix.ai
+inferix.co, vallorix.ai
+
+(Operator email is given on the request form itself. It is deliberately not in
+this file, because this file is public — the repository is linked in the
+request so a reviewer can check every claim above against the source.)
