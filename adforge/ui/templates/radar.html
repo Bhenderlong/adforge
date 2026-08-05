@@ -39,6 +39,19 @@
      which its ToS forbids and which gets the account terminated.</p>
 </div>
 
+{% if blockers %}
+<div class="note bad">
+  <p><strong>Nothing will be scanned.</strong> Every enabled target is blocked:</p>
+  <ul style="margin:6px 0 0; padding-left:18px">
+    {% for b in blockers %}<li>{{ b }}</li>{% endfor %}
+  </ul>
+  <p>"Scan now" will still return you here without an error — it skips what it
+     cannot reach. Fix the above on <a href="/accounts">Accounts</a> first;
+     <code class="mono">run.py --auth reddit</code> prints where each
+     platform's credentials come from.</p>
+</div>
+{% endif %}
+
 <h2>Targets</h2>
 <div class="grid g2">
   {% for t in targets %}

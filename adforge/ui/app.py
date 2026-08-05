@@ -964,6 +964,40 @@ def radar(request: Request, brand: str = "", min_rel: float = 0.0):
             q = q.filter(RadarThread.relevance >= min_rel)
         threads = q.order_by(RadarThread.relevance.desc()).limit(120).all()
         targets = s.query(RadarTarget).order_by(RadarTarget.brand).all()
+
+        # Why a scan found nothing. "Scan now" returns 303 and re-renders the
+        # page whether it scanned or skipped every target, so a missing
+        # credential looked exactly like a scan that found no matches. The
+        # reason was only in the log.
+        blockers = []
+        need = {"reddit": ("client_id", "client_secret", "username", "password"),
+                "discord": ("bot_token",)}
+        for tgt in targets:
+            if not tgt.enabled:
+                continue
+            acct = (
+                s.query(Account)
+                .filter_by(brand=tgt.brand, platform=tgt.source)
+                .first()
+            )
+            if acct is None:
+                blockers.append(f"{tgt.brand}/{tgt.source}: no account exists")
+                continue
+            creds = acct.creds()
+            missing = [k for k in need.get(tgt.source, ()) if not str(creds.get(k, "")).strip()]
+            if missing:
+                blockers.append(
+                    f"{tgt.brand}/{tgt.source}: no credentials yet "
+                    f"({', '.join(missing)})"
+                )
+            elif not acct.enabled:
+                blockers.append(
+                    f"{tgt.brand}/{tgt.source}: credentials are set but the "
+                    f"account is disabled"
+                )
+            elif not tgt.keyword_list():
+                blockers.append(f"{tgt.brand}/{tgt.source}: no keywords")
+        blockers = sorted(set(blockers))
         drafts = {}
         for t in threads:
             d = (
@@ -977,6 +1011,7 @@ def radar(request: Request, brand: str = "", min_rel: float = 0.0):
     return templates.TemplateResponse(
         request, "radar.html",
         ctx(request, threads=threads, targets=targets, drafts=drafts,
+            blockers=blockers,
             f_brand=brand, f_min=min_rel),
     )
 

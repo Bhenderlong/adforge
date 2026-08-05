@@ -327,3 +327,41 @@ def test_unattended_detection_requires_all_four_settings(monkeypatch, tmp_path):
     with db.session_scope() as s:
         s.query(db.Account).update({"dry_run": False, "mode": db.PostMode.MANUAL})
     assert ui._unattended() == [], "MANUAL always waits for a human"
+
+
+def test_radar_page_explains_why_a_scan_would_find_nothing(tmp_path):
+    """A skipped scan looked identical to a scan that found no matches.
+
+    "Scan now" returns 303 and re-renders either way, so a missing credential
+    presented as "the radar doesn't do anything" with the reason only in the
+    log.
+    """
+    import importlib
+
+    from adforge.config import settings as cfg
+
+    cfg.db_url = f"sqlite:///{tmp_path}/t.db"
+    import adforge.db as db
+
+    importlib.reload(db)
+    db.init_db()
+    import adforge.ui.app as ui
+
+    importlib.reload(ui)
+
+    from fastapi.testclient import TestClient
+
+    with db.session_scope() as s:
+        s.add(db.Account(brand="inferix", platform="reddit", enabled=False,
+                         credentials="{}", options="{}"))
+        s.add(db.RadarTarget(brand="inferix", source="reddit", target="all",
+                             keywords="gpu cloud", enabled=True))
+
+    # NOT used as a context manager: that runs the app's lifespan, and the
+    # shutdown hook calls POOL.shutdown(), killing the thread pool for every
+    # test that runs afterwards. Seeding the DB directly means startup is not
+    # needed here anyway.
+    body = TestClient(ui.app).get("/radar").text
+    assert "Nothing will be scanned" in body
+    assert "no credentials yet" in body
+    assert "client_id" in body
