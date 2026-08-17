@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <rect width="64" height="64" rx="13" fill="#0b0f14"/>
+  <rect x="1.5" y="1.5" width="61" height="61" rx="11.5" fill="none"
+        stroke="#164e63" stroke-width="1.5"/>
+  <!-- anvil: the "forge" half of the name -->
+  <path d="M16 34h32l-5 6H21z" fill="#06b6d4"/>
+  <path d="M27 40h10v4h4v3H23v-3h4z" fill="#06b6d4"/>
+  <!-- spark -->
+  <path d="M32 12l3.2 7.4L43 22l-7.8 2.6L32 32l-3.2-7.4L21 22l7.8-2.6z"
+        fill="#67e8f9"/>
+</svg>
