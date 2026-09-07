@@ -630,3 +630,18 @@ def test_preflight_rejects_a_non_wan_model_as_a_wan_expert():
     src = pathlib.Path("run.py").read_text()
     assert 'elif "wan" not in name.lower():' in src
     assert "settings.wan_high_noise == settings.wan_low_noise" in src
+
+
+def test_a_person_id_relabelled_as_an_organization_is_rejected():
+    """LinkedIn ignores the mismatch and posts to the profile anyway.
+
+    So the obvious fix - change the prefix from person to organization -
+    reports success while every post lands in the wrong place.
+    """
+    from adforge.platforms.verify import verify_linkedin
+
+    # Cannot hit the network in a test; assert the guard exists and is specific.
+    src = pathlib.Path("adforge/platforms/verify.py").read_text()
+    body = src.split("def verify_linkedin", 1)[1].split("\ndef ", 1)[0]
+    assert 'urn == f"urn:li:organization:{sub}"' in body
+    assert ".isdigit()" in body, "an organization id must be numeric"

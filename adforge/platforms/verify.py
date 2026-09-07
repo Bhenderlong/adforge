@@ -107,9 +107,28 @@ def verify_linkedin(creds: dict, opts: dict) -> tuple[bool, str]:
             return False, "401 - access token expired or invalid (LinkedIn tokens last 60 days)"
         if r.status_code >= 400:
             return False, f"{r.status_code}: {r.text[:150]}"
-        who = r.json().get("name") or r.json().get("sub", "?")
+        body = r.json()
+        who = body.get("name") or body.get("sub", "?")
+        sub = str(body.get("sub", ""))
         msg = f"token valid for {who}"
         if urn.startswith("urn:li:organization:"):
+            # Relabelling a person id as an organization is the obvious thing
+            # to try and it does not work: LinkedIn ignores the mismatch and
+            # posts to the profile anyway, so the tool reports success while
+            # every post lands in the wrong place. An organization URN is a
+            # NUMERIC page id, unrelated to your member id.
+            if sub and urn == f"urn:li:organization:{sub}":
+                return False, (
+                    f"author_urn is urn:li:organization:{sub}, but {sub} is "
+                    f"YOUR member id, not an organization id - posts will go "
+                    f"to your personal profile. A company URN is numeric "
+                    f"(urn:li:organization:12345678) and requires "
+                    f"w_organization_social, which only comes with LinkedIn's "
+                    f"Community Management API approval.")
+            if not urn.removeprefix("urn:li:organization:").isdigit():
+                return False, (
+                    f"author_urn {urn!r} is not a valid organization URN - "
+                    f"the id after the prefix must be numeric")
             msg += "; posting as an organization needs the w_organization_social scope"
         elif not urn.startswith("urn:li:person:"):
             return False, (f"author_urn {urn!r} is malformed - it must be "
