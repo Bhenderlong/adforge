@@ -204,6 +204,10 @@ def main() -> int:
                          "credentials to paste into Accounts")
     ap.add_argument("--client-id", default="", help="OAuth client id for --auth")
     ap.add_argument("--client-secret", default="", help="OAuth client secret for --auth")
+    ap.add_argument("--scopes", default="",
+                    help="comma-separated scope override for --auth meta; "
+                         "use when Meta reports Invalid Scopes because your "
+                         "app offers different names")
     ap.add_argument("--secrets-file", default="",
                     help="path to the client_secret JSON downloaded from Google")
     ap.add_argument("--selftest", action="store_true",
@@ -254,7 +258,11 @@ def main() -> int:
             if not client_secret:
                 print(setup)
                 return 1
-            creds = fn(args.client_id, client_secret)
+            try:
+                creds = fn(args.client_id, client_secret, args.scopes) \
+                    if want == "meta" else fn(args.client_id, client_secret)
+            except TypeError:
+                creds = fn(args.client_id, client_secret)
             print_result(want.title(), creds)
             return 0
 

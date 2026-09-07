@@ -178,21 +178,30 @@ PAGE token for each - that is the one AdForge needs.
 """ % REDIRECT_URI
 
 
-def meta_auth(client_id: str, client_secret: str) -> dict:
+# Meta rejects the WHOLE dialog if any single scope is unknown to the app
+# ("Invalid Scopes: pages_manage_posts, instagram_content_publish"), and it
+# is renaming these right now - instagram_basic is becoming
+# instagram_business_basic. Overridable so a naming change is a flag, not a
+# code edit and a wait.
+META_SCOPES = [
+    "pages_show_list",
+    "pages_manage_posts",
+    "pages_read_engagement",
+    "instagram_basic",
+    "instagram_content_publish",
+    "business_management",
+]
+
+
+def meta_auth(client_id: str, client_secret: str, scopes: str = "") -> dict:
+    want = [s.strip() for s in scopes.split(",") if s.strip()] or META_SCOPES
     got = _authorise(
         "https://www.facebook.com/v21.0/dialog/oauth",
         {
             "client_id": client_id,
             "redirect_uri": REDIRECT_URI,
             "response_type": "code",
-            "scope": ",".join([
-                "pages_show_list",
-                "pages_manage_posts",
-                "pages_read_engagement",
-                "instagram_basic",
-                "instagram_content_publish",
-                "business_management",
-            ]),
+            "scope": ",".join(want),
         },
     )
     graph = "https://graph.facebook.com/v21.0"
