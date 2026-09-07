@@ -559,3 +559,33 @@ def test_both_link_decisions_use_the_same_target():
     assert src.count("_target_for(s, thread)") >= 3
     body = src.split("def _draft_job", 1)[1]
     assert "RadarTarget.brand == thread.brand" not in body.split("def _target_for")[0]
+
+
+def test_media_publish_refuses_a_non_https_base():
+    """Meta fetches this URL from the internet; http:// or localhost cannot work."""
+    import pytest
+
+    from adforge.media.publish import PublishMediaError, ensure_public
+
+    with pytest.raises(PublishMediaError, match="https"):
+        ensure_public(pathlib.Path("/etc/hostname"), "http://127.0.0.1:8770/media")
+
+
+def test_media_publish_verifies_the_url_not_just_the_upload():
+    """rsync succeeding proves bytes reached the host, not that they are served.
+
+    Meta reports a failed fetch as a generic media-creation error naming
+    neither the URL nor the reason, so the check has to happen here.
+    """
+    src = pathlib.Path("adforge/media/publish.py").read_text()
+    after_rsync = src.split("subprocess.run(cmd", 1)[1]
+    assert "_already_there(url)" in after_rsync, \
+        "upload path must confirm the URL is fetchable before returning"
+
+
+def test_instagram_uploads_before_telling_meta_to_fetch():
+    src = pathlib.Path("adforge/platforms/social.py").read_text()
+    body = src.split("class InstagramAdapter", 1)[1].split("\nclass ", 1)[0]
+    upload = body.index("ensure_public")
+    container = body.index("/media\"")
+    assert upload < container, "must upload before creating the media container"

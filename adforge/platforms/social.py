@@ -334,11 +334,15 @@ class InstagramAdapter(BaseAdapter):
         if dry_run:
             return self.dry(payload, f"would tell Meta to fetch {media_url}")
 
-        if not base.startswith("https://"):
-            raise PublishError(
-                "public_media_base must be an https:// URL Meta can reach; "
-                f"got {base!r}"
-            )
+        # Upload BEFORE creating the container. Meta fetches the URL itself,
+        # and reports a failed fetch as a generic media-creation error that
+        # names neither the URL nor the reason.
+        from ..media.publish import PublishMediaError, ensure_public
+
+        try:
+            media_url = ensure_public(Path(media), base)
+        except PublishMediaError as e:
+            raise PublishError(str(e), retryable=False) from None
 
         uid, token = creds["ig_user_id"], creds["access_token"]
         is_video = Path(media).suffix.lower() in (".mp4", ".mov")

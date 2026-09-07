@@ -94,6 +94,9 @@ class Settings(BaseSettings):
         return out
 
     # ---- media -------------------------------------------------------------
+    # Where to rsync an asset so the public_media_base URL can serve it.
+    # Empty means "something else already publishes that directory".
+    media_sync_target: str = ""
     comfy_url: str = "http://127.0.0.1:8189"
     comfy_checkpoint: str = "RealVisXL_V5.0_fp16.safetensors"
     comfy_timeout: int = 1800
