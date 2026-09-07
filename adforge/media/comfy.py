@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
@@ -30,6 +31,10 @@ class ComfyError(RuntimeError):
     pass
 
 
+class ComfyError(RuntimeError):
+    """A ComfyUI rejection, carrying what the server actually said."""
+
+
 def _url(path: str) -> str:
     return f"{settings.comfy_url.rstrip('/')}{path}"
 
@@ -40,8 +45,32 @@ def _post(path: str, payload: dict) -> dict:
         data=json.dumps(payload).encode(),
         headers={"Content-Type": "application/json"},
     )
-    with urllib.request.urlopen(req, timeout=60) as r:
-        return json.load(r)
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            return json.load(r)
+    except urllib.error.HTTPError as e:
+        # urllib's str(HTTPError) is "HTTP Error 400: Bad Request" and nothing
+        # else, while ComfyUI puts the actual reason in the BODY - which node,
+        # which input, and what it expected. Every Wan render failed for weeks
+        # behind that generic string; the body said the model file did not
+        # exist. Never let this be discarded again.
+        detail = ""
+        try:
+            body = json.loads(e.read().decode("utf8", "replace"))
+            bits = []
+            if msg := body.get("error", {}).get("message"):
+                bits.append(str(msg))
+            for node, info in (body.get("node_errors") or {}).items():
+                for err in info.get("errors", []):
+                    bits.append(
+                        f"node {info.get('class_type', node)}: "
+                        f"{err.get('message', '')} {err.get('details', '')}".strip())
+            detail = " | ".join(b for b in bits if b)[:600]
+        except Exception:  # noqa: BLE001 - the body is best-effort
+            pass
+        raise ComfyError(
+            f"comfyui {e.code} on {path}: {detail or 'no detail in response body'}"
+        ) from None
 
 
 def _get(path: str) -> dict:

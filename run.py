@@ -75,6 +75,19 @@ def check() -> int:
                 if name not in unets:
                     print(f"[warn] {label} model {name!r} not found")
                     problems += 1
+                elif "wan" not in name.lower():
+                    # Both experts were once set to Chroma1-HD, a text-to-image
+                    # model. It IS in the unet list, so the presence check
+                    # above passed, and every render failed with a bare
+                    # "HTTP Error 400" for weeks.
+                    print(f"[warn] {label} is {name!r}, which does not look "
+                          f"like a Wan model - i2v will fail on every scene")
+                    problems += 1
+            if settings.wan_high_noise == settings.wan_low_noise:
+                print(f"[warn] wan high-noise and low-noise are the same file "
+                      f"({settings.wan_high_noise!r}). They are two halves of a "
+                      f"split sampler and must differ.")
+                problems += 1
             vaes = comfy.list_options("VAELoader", "vae_name")
             if settings.wan_vae not in vaes:
                 print(f"[warn] wan vae {settings.wan_vae!r} not found")

@@ -608,3 +608,25 @@ def test_restart_is_spawned_detached():
     src = pathlib.Path("adforge/ui/app.py").read_text()
     body = src.split("def settings_restart", 1)[1].split("\n@app.", 1)[0]
     assert "start_new_session=True" in body
+
+
+def test_comfy_errors_carry_the_response_body():
+    """urllib's str(HTTPError) is "HTTP Error 400: Bad Request" and nothing else.
+
+    ComfyUI puts the actual reason in the body - which node, which input, what
+    it expected. Every Wan render failed for weeks behind that generic string
+    while the body said the model file did not exist.
+    """
+    src = pathlib.Path("adforge/media/comfy.py").read_text()
+    post = src.split("def _post", 1)[1].split("\ndef ", 1)[0]
+    assert "HTTPError" in post, "_post must catch HTTPError rather than let it propagate"
+    assert "e.read()" in post, "the response body must be read, not discarded"
+    assert "node_errors" in post, "per-node detail is the useful part"
+
+
+def test_preflight_rejects_a_non_wan_model_as_a_wan_expert():
+    """Chroma1-HD is a text-to-image model and IS in the unet list, so a
+    presence check passes while every i2v scene 400s."""
+    src = pathlib.Path("run.py").read_text()
+    assert 'elif "wan" not in name.lower():' in src
+    assert "settings.wan_high_noise == settings.wan_low_noise" in src
