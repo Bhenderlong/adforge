@@ -148,17 +148,24 @@ def verify_instagram(creds: dict, opts: dict) -> tuple[bool, str]:
         with httpx.Client(timeout=TIMEOUT) as c:
             r = c.get(
                 f"https://graph.facebook.com/v21.0/{creds['ig_user_id']}",
-                params={"fields": "username,account_type",
+                # NOT account_type: that field belongs to the Instagram Basic
+                # Display API, and asking the Graph API for it fails the whole
+                # request with "(#100) Tried accessing nonexisting field".
+                # The check it guarded is redundant anyway - an id reachable
+                # as a Page's instagram_business_account is a Business or
+                # Creator account by construction.
+                params={"fields": "username,name,media_count,followers_count",
                         "access_token": creds["access_token"]},
             )
         if r.status_code >= 400:
             return False, f"{r.status_code}: {r.text[:180]}"
         d = r.json()
-        kind = d.get("account_type", "")
-        msg = f"@{d.get('username', '?')} ({kind})"
-        if kind not in ("BUSINESS", "MEDIA_CREATOR", ""):
-            return False, msg + " - the API only publishes for Business/Creator accounts"
-        return True, msg
+        bits = [f"@{d.get('username', '?')}"]
+        if d.get("media_count") is not None:
+            bits.append(f"{d['media_count']} posts")
+        if d.get("followers_count") is not None:
+            bits.append(f"{d['followers_count']} followers")
+        return True, ", ".join(bits)
     except Exception as e:  # noqa: BLE001
         return _fail(e)
 
