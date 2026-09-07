@@ -239,10 +239,22 @@ def main() -> int:
 
         if want in FLOWS:
             fn, setup = FLOWS[want]
-            if not (args.client_id and args.client_secret):
+            if not args.client_id:
                 print(setup)
                 return 1
-            creds = fn(args.client_id, args.client_secret)
+            client_secret = args.client_secret
+            if not client_secret:
+                # Prompted rather than demanded as a flag: a secret passed on
+                # the command line lands in shell history and is readable from
+                # /proc by anything running as this user while it executes.
+                import getpass
+
+                client_secret = getpass.getpass(
+                    f"{want} client secret (not echoed): ").strip()
+            if not client_secret:
+                print(setup)
+                return 1
+            creds = fn(args.client_id, client_secret)
             print_result(want.title(), creds)
             return 0
 
