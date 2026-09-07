@@ -669,3 +669,35 @@ def test_a_blocked_restart_offers_a_way_through():
     # ...but NOT for the mid-send case, where the cost is a duplicate post.
     sending = body.split("if sending:", 1)[1].split("if busy", 1)[0]
     assert "Restart anyway" not in sending
+
+
+def test_step_distilled_loras_are_applied_to_the_matching_expert():
+    """HIGH goes on the high-noise model, LOW on the low-noise one.
+
+    Crossing them degrades motion badly, and that reads as the model being bad
+    rather than the wiring being wrong - the same shape as pointing both
+    experts at a text-to-image checkpoint.
+    """
+    from adforge.media.comfy import build_i2v
+
+    g = build_i2v("img", "p", "n", seed=1, high_noise="HI.safetensors",
+                  low_noise="LO.safetensors", vae="v", text_encoder="t",
+                  lora_high="LORA_HI.safetensors", lora_low="LORA_LO.safetensors")
+    assert g["1"]["inputs"]["unet_name"] == "HI.safetensors"
+    assert g["1a"]["inputs"]["lora_name"] == "LORA_HI.safetensors"
+    assert g["1a"]["inputs"]["model"] == ["1", 0]
+    assert g["2a"]["inputs"]["lora_name"] == "LORA_LO.safetensors"
+    assert g["2a"]["inputs"]["model"] == ["2", 0]
+    # The samplers must consume the LoRA-wrapped models, not the raw ones.
+    assert g["9"]["inputs"]["model"] == ["1a", 0]
+    assert g["10"]["inputs"]["model"] == ["2a", 0]
+
+
+def test_i2v_without_loras_still_uses_the_raw_models():
+    from adforge.media.comfy import build_i2v
+
+    g = build_i2v("img", "p", "n", seed=1, high_noise="HI", low_noise="LO",
+                  vae="v", text_encoder="t")
+    assert "1a" not in g and "2a" not in g
+    assert g["9"]["inputs"]["model"] == ["1", 0]
+    assert g["10"]["inputs"]["model"] == ["2", 0]

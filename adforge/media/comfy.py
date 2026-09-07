@@ -245,6 +245,9 @@ def build_i2v(
     text_encoder: str,
     cfg: float = 4.0,
     steps: int = 20,
+    lora_high: str = "",
+    lora_low: str = "",
+    lora_strength: float = 1.0,
     sampler: str = "euler",
     scheduler: str = "simple",
     length: int = 49,
@@ -258,7 +261,26 @@ def build_i2v(
     noise to the low-noise expert - that hand-off is what the two-model release
     is designed around, and collapsing it to one sampler degrades motion badly.
     """
+    # Step-distillation LoRAs (lightx2v / Lightning) cut sampling from ~20
+    # steps to 4. They come as a matched HIGH/LOW pair and must be applied to
+    # the matching expert - crossing them over degrades motion badly, which
+    # looks like the model being bad rather than the wiring being wrong.
+    hi_model: list = ["1", 0]
+    lo_model: list = ["2", 0]
+    extra: dict = {}
+    if lora_high:
+        extra["1a"] = {"class_type": "LoraLoaderModelOnly",
+                       "inputs": {"model": ["1", 0], "lora_name": lora_high,
+                                  "strength_model": lora_strength}}
+        hi_model = ["1a", 0]
+    if lora_low:
+        extra["2a"] = {"class_type": "LoraLoaderModelOnly",
+                       "inputs": {"model": ["2", 0], "lora_name": lora_low,
+                                  "strength_model": lora_strength}}
+        lo_model = ["2a", 0]
+
     return {
+        **extra,
         "1": {"class_type": "UNETLoader",
               "inputs": {"unet_name": high_noise, "weight_dtype": "fp8_e4m3fn"}},
         "2": {"class_type": "UNETLoader",
@@ -277,7 +299,7 @@ def build_i2v(
                          "width": width, "height": height,
                          "length": length, "batch_size": 1}},
         "9": {"class_type": "KSamplerAdvanced",
-              "inputs": {"model": ["1", 0], "add_noise": "enable",
+              "inputs": {"model": hi_model, "add_noise": "enable",
                          "noise_seed": seed, "steps": steps, "cfg": cfg,
                          "sampler_name": sampler, "scheduler": scheduler,
                          "start_at_step": 0, "end_at_step": steps // 2,
@@ -285,7 +307,7 @@ def build_i2v(
                          "positive": ["8", 0], "negative": ["8", 1],
                          "latent_image": ["8", 2]}},
         "10": {"class_type": "KSamplerAdvanced",
-               "inputs": {"model": ["2", 0], "add_noise": "disable",
+               "inputs": {"model": lo_model, "add_noise": "disable",
                           "noise_seed": seed, "steps": steps, "cfg": cfg,
                           "sampler_name": sampler, "scheduler": scheduler,
                           "start_at_step": steps // 2, "end_at_step": 10000,

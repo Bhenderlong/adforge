@@ -96,6 +96,14 @@ class Settings(BaseSettings):
     # ---- media -------------------------------------------------------------
     # Where to rsync an asset so the public_media_base URL can serve it.
     # Empty means "something else already publishes that directory".
+    # Step-distillation LoRAs. Empty means full 20-step sampling.
+    wan_lora_high: str = "wan2.2_i2v_lightx2v_4steps_lora_v1_high_noise.safetensors"
+    wan_lora_low: str = "wan2.2_i2v_lightx2v_4steps_lora_v1_low_noise.safetensors"
+    wan_lora_strength: float = 1.0
+    # 4 steps and cfg 1.0 are what the distilled LoRAs are trained for; with
+    # them set and no LoRA loaded the output is noise.
+    wan_steps: int = 4
+    wan_cfg: float = 1.0
     media_sync_target: str = ""
     comfy_url: str = "http://127.0.0.1:8189"
     comfy_checkpoint: str = "RealVisXL_V5.0_fp16.safetensors"
