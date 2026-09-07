@@ -1655,7 +1655,7 @@ async def settings_save(request: Request):
 
 
 @app.post("/settings/restart")
-def settings_restart(request: Request):
+def settings_restart(request: Request, force: str = Form("")):
     """Restart the server so a saved setting takes effect.
 
     Refused while a publish is in flight. reap_stale_claims() returns a
@@ -1668,8 +1668,15 @@ def settings_restart(request: Request):
         sending = (s.query(Post)
                     .filter(Post.status == PostStatus.PUBLISHING).count())
     with JOBS_LOCK:
+        # Only work that is EXPENSIVE and not resumable should block. The
+        # planner and the publish tick both run on a timer and redo themselves
+        # within the minute, but "plan" takes minutes, so treating every job as
+        # precious meant the button refused most of the time - which reads as
+        # broken, not as careful.
+        cheap = ("plan", "publish-tick", "radar", "metrics")
         busy = [j["name"] for j in JOBS.values()
-                if j["state"] in ("running", "queued")]
+                if j["state"] in ("running", "queued")
+                and not j["name"].startswith(cheap)]
 
     if sending:
         return _error_page(
@@ -1680,13 +1687,18 @@ def settings_restart(request: Request):
             "Publishing is attempted every minute - wait a moment and try "
             "again.", 409)
 
-    if busy:
+    if busy and not force:
+        back = request.headers.get("referer", "/settings")
         return _error_page(
             request, "Not restarting right now",
             "These jobs would be lost: <strong>" + ", ".join(busy[:6])
-            + "</strong>. Generation takes minutes and the work is not "
-            "resumable, so this waits rather than discarding it. Cancel them "
-            "or let them finish.", 409)
+            + "</strong>. Generation takes minutes and is not resumable, so "
+            "this waits rather than discarding it."
+            '<form method="post" action="/settings/restart" style="margin-top:1rem">'
+            '<input type="hidden" name="force" value="1">'
+            '<button style="font:inherit;padding:.5rem 1rem;cursor:pointer">'
+            'Restart anyway, discarding them</button></form>'
+            f'<p style="margin-top:1rem"><a href="{back}">Back</a></p>', 409)
 
     script = ROOT / "scripts" / "adforge-restart.sh"
     if not script.exists():

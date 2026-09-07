@@ -645,3 +645,27 @@ def test_a_person_id_relabelled_as_an_organization_is_rejected():
     body = src.split("def verify_linkedin", 1)[1].split("\ndef ", 1)[0]
     assert 'urn == f"urn:li:organization:{sub}"' in body
     assert ".isdigit()" in body, "an organization id must be numeric"
+
+
+def test_only_expensive_jobs_block_a_restart():
+    """The planner runs on a timer and takes minutes.
+
+    Treating every job as precious meant the button refused most of the time,
+    which reads as broken rather than careful - and the user then kills the
+    process by hand, which is strictly worse.
+    """
+    src = pathlib.Path("adforge/ui/app.py").read_text()
+    body = src.split("def settings_restart", 1)[1].split("\n@app.", 1)[0]
+    assert "startswith(cheap)" in body
+    for name in ("plan", "publish-tick", "radar", "metrics"):
+        assert f'"{name}"' in body, f"{name} should not block a restart"
+
+
+def test_a_blocked_restart_offers_a_way_through():
+    """A refusal with no override is indistinguishable from a broken button."""
+    src = pathlib.Path("adforge/ui/app.py").read_text()
+    body = src.split("def settings_restart", 1)[1].split("\n@app.", 1)[0]
+    assert "Restart anyway" in body
+    # ...but NOT for the mid-send case, where the cost is a duplicate post.
+    sending = body.split("if sending:", 1)[1].split("if busy", 1)[0]
+    assert "Restart anyway" not in sending
