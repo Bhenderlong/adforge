@@ -15,7 +15,9 @@ from __future__ import annotations
 import datetime as dt
 import json
 import logging
+import os
 import re
+import subprocess
 import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -1650,6 +1652,82 @@ async def settings_save(request: Request):
 # ---------------------------------------------------------------------------
 # Jobs
 # ---------------------------------------------------------------------------
+
+
+@app.post("/settings/restart")
+def settings_restart(request: Request):
+    """Restart the server so a saved setting takes effect.
+
+    Refused while a publish is in flight. reap_stale_claims() returns a
+    stranded PUBLISHING row to APPROVED, but it cannot know whether the
+    platform already accepted the post before the process died - so the retry
+    would be a duplicate, and a duplicate is worse than a delayed restart
+    because only the missing one is fixable from the queue.
+    """
+    with session_scope() as s:
+        sending = (s.query(Post)
+                    .filter(Post.status == PostStatus.PUBLISHING).count())
+    with JOBS_LOCK:
+        busy = [j["name"] for j in JOBS.values()
+                if j["state"] in ("running", "queued")]
+
+    if sending:
+        return _error_page(
+            request, "Not restarting right now",
+            f"{sending} post(s) are mid-send. Killing the process now could "
+            "publish them twice: the claim would be requeued, but nothing can "
+            "tell whether the platform already accepted the first attempt. "
+            "Publishing is attempted every minute - wait a moment and try "
+            "again.", 409)
+
+    if busy:
+        return _error_page(
+            request, "Not restarting right now",
+            "These jobs would be lost: <strong>" + ", ".join(busy[:6])
+            + "</strong>. Generation takes minutes and the work is not "
+            "resumable, so this waits rather than discarding it. Cancel them "
+            "or let them finish.", 409)
+
+    script = ROOT / "scripts" / "adforge-restart.sh"
+    if not script.exists():
+        raise HTTPException(500, f"missing {script}")
+
+    # Detached: this process is about to be killed by what it is spawning.
+    subprocess.Popen(
+        [str(script), str(os.getpid()), str(settings.port)],
+        start_new_session=True,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    log.warning("restart requested from the UI; pid %s exiting shortly", os.getpid())
+
+    # Served BEFORE the process dies. A plain redirect would race the shutdown
+    # and show a connection error, which reads as "the button broke it".
+    return HTMLResponse(
+        """<!doctype html><meta charset=utf-8><title>Restarting AdForge</title>
+<style>body{font:15px system-ui;background:#0b0f14;color:#e2e8f0;padding:3rem;
+max-width:36rem}a{color:#06b6d4}.d{opacity:.6}</style>
+<h2>Restarting…</h2>
+<p class=d>The server is stopping and starting again. This page returns to
+Settings by itself the moment it is back, usually a second or two.</p>
+<p id=s class=d>waiting…</p>
+<script>
+let n = 0;
+const tick = async () => {
+  n++;
+  try {
+    const r = await fetch('/api/status', {cache: 'no-store'});
+    if (r.ok) { location.href = '/settings?restarted=1'; return; }
+  } catch (e) { /* expected while it is down */ }
+  document.getElementById('s').textContent =
+    n > 40 ? 'Still down after ' + n + ' tries - check the log at '
+           + '~/.local/state/adforge/adforge.log'
+           : 'waiting… (' + n + ')';
+  setTimeout(tick, 500);
+};
+setTimeout(tick, 1200);
+</script>""")
 
 
 @app.get("/api/jobs")

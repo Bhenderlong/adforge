@@ -4,6 +4,11 @@
 <h1>Settings</h1>
 <p class="sub">Written to <code class="mono">{{ env_path }}</code>. A restart applies them.</p>
 
+{% if request.query_params.get('restarted') %}
+<div class="note"><p><strong>AdForge restarted.</strong> Everything saved
+   before the restart is now in effect.</p></div>
+{% endif %}
+
 {% if request.query_params.get('saved') %}
 <div class="note"><p><strong>Saved.</strong> Restart AdForge for these to take
    effect — the running process is not hot-patched, and pretending otherwise
@@ -268,8 +273,27 @@
   </div>
 </div>
 
-<div style="margin:18px 0 40px">
+<div style="margin:18px 0 12px">
   <button class="primary" type="submit">Save settings</button>
 </div>
 </form>
+
+<div class="card" style="margin-bottom:40px">
+  <div class="row">
+    <div style="flex:1">
+      <strong>Restart AdForge</strong>
+      <div class="hint">Settings above are written to
+        <code class="mono">.env</code> and read at startup, so they do nothing
+        until the process restarts. This restarts it in place — the page waits
+        and returns here by itself.</div>
+      <div class="hint">Refused while a post is mid-send or a generation is
+        running, because neither is resumable and a half-sent post could be
+        published twice.</div>
+    </div>
+    <form method="post" action="/settings/restart">
+      <button class="danger"
+              onclick="return confirm('Restart AdForge now?')">Restart</button>
+    </form>
+  </div>
+</div>
 {% endblock %}

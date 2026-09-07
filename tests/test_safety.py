@@ -589,3 +589,22 @@ def test_instagram_uploads_before_telling_meta_to_fetch():
     upload = body.index("ensure_public")
     container = body.index("/media\"")
     assert upload < container, "must upload before creating the media container"
+
+
+def test_restart_refuses_while_a_post_is_mid_send():
+    """reap_stale_claims requeues a stranded claim, but cannot know whether
+    the platform already accepted the first attempt - so the retry would be a
+    duplicate. A delayed restart is strictly better than a double post."""
+    src = pathlib.Path("adforge/ui/app.py").read_text()
+    body = src.split("def settings_restart", 1)[1].split("\n@app.", 1)[0]
+    assert "PostStatus.PUBLISHING" in body
+    refuse = body.index("if sending:")
+    spawn = body.index("subprocess.Popen")
+    assert refuse < spawn, "the mid-send check must run before anything is spawned"
+
+
+def test_restart_is_spawned_detached():
+    """The process being killed is the one serving the request that asked."""
+    src = pathlib.Path("adforge/ui/app.py").read_text()
+    body = src.split("def settings_restart", 1)[1].split("\n@app.", 1)[0]
+    assert "start_new_session=True" in body
