@@ -1,0 +1,315 @@
+<!doctype html>
+<meta charset="utf-8">
+<!--
+  Inferix short: "change the base URL".
+
+  Every value on screen traces to a brand proof point - no invented timers, no
+  manufactured competitor numbers. The hero beat is one line of code changing,
+  because that IS the claim: existing SDK code runs unmodified.
+
+  Nothing here animates itself. window.__frame(t) computes the exact state at
+  t seconds, so a frame is reproducible and can be inspected on its own. CSS
+  transitions and requestAnimationFrame would both make the render depend on
+  wall-clock time and produce a different video every pass.
+-->
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1080px; height: 1920px; overflow: hidden; }
+  body {
+    background: #07090d;
+    color: #e8eef5;
+    font-family: Inter, "Helvetica Neue", system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .stage { position: absolute; inset: 0; }
+  .beat { position: absolute; inset: 0; opacity: 0; }
+
+  /* A single wash of brand colour behind everything, so the black is not flat.
+     Two blurred radials rather than a gradient: a gradient bands visibly at
+     1080px wide after h264 quantisation. */
+  .wash { position: absolute; inset: -20%; filter: blur(120px); opacity: .5; }
+  .wash i { position: absolute; border-radius: 50%; display: block; }
+  .w1 { width: 900px; height: 900px; background: #0891b2; left: -12%; top: 4%; }
+  .w2 { width: 760px; height: 760px; background: #155e75; right: -14%; bottom: 8%; }
+
+  /* Safe areas: shorts UIs put the caption and CTA over the bottom ~200px
+     and the account chip over the top ~120px. Content is centred between
+     them rather than pinned to the top, which left half the frame empty. */
+  .pad { position: absolute; inset: 0; padding: 200px 88px 280px;
+         display: flex; flex-direction: column; justify-content: center; }
+  .eyebrow {
+    font-size: 30px; font-weight: 600; letter-spacing: .22em;
+    text-transform: uppercase; color: #22d3ee;
+  }
+  h1 { font-size: 112px; line-height: 1.04; font-weight: 700; letter-spacing: -.03em; }
+  h1 .dim { color: #64748b; }
+  h2 { font-size: 86px; line-height: 1.1; font-weight: 700; letter-spacing: -.025em; }
+  .sub { font-size: 44px; line-height: 1.35; color: #94a3b8; font-weight: 450; }
+
+  /* Code card */
+  .card {
+    background: #0d1218; border: 1px solid #1e2a36; border-radius: 28px;
+    box-shadow: 0 60px 120px rgba(0,0,0,.55);
+    overflow: hidden;
+  }
+  .chrome {
+    height: 74px; display: flex; align-items: center; gap: 12px;
+    padding: 0 28px; border-bottom: 1px solid #1a242f; background: #0a0f14;
+  }
+  .dot { width: 14px; height: 14px; border-radius: 50%; background: #243040; }
+  .fname {
+    margin-left: 14px; font: 500 26px/1 ui-monospace, "SF Mono", Menlo, monospace;
+    color: #5b6b7c;
+  }
+  code, .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  .code { padding: 38px 34px; font-size: 36px; line-height: 1.62; }
+  .ln { display: block; white-space: pre; color: #8fa3b8; }
+  .ln .k { color: #c084fc; }
+  .ln .s { color: #7dd3fc; }
+  .ln .f { color: #e8eef5; }
+  .old { color: #64748b; position: relative; }
+  .old .strike {
+    position: absolute; left: 0; top: 52%; height: 3px; background: #ef4444;
+    opacity: .9;
+  }
+  .new { color: #22d3ee; }
+  .caret { display: inline-block; width: 3px; height: 34px; background: #22d3ee;
+           vertical-align: -5px; }
+
+  /* Terminal */
+  .term { padding: 38px 34px; font-size: 34px; line-height: 1.6; }
+  .term .p { color: #22d3ee; }
+  .term .o { color: #cbd5e1; }
+
+  .claims { display: flex; flex-direction: column; gap: 54px; }
+  .claim { display: flex; align-items: center; gap: 32px; font-size: 54px; font-weight: 550; }
+  .tick {
+    width: 62px; height: 62px; border-radius: 50%; flex: 0 0 62px;
+    background: rgba(34,211,238,.12); border: 2px solid #22d3ee;
+    display: flex; align-items: center; justify-content: center;
+    color: #22d3ee; font-size: 34px; font-weight: 700;
+  }
+
+  /* CTA */
+  .logo { display: flex; align-items: center; gap: 26px; }
+  .mark {
+    width: 128px; height: 128px; border-radius: 26px;
+    background: linear-gradient(140deg, #22d3ee, #0e7490);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 70px; font-weight: 800; color: #04252c;
+  }
+  .wordmark { font-size: 92px; font-weight: 700; letter-spacing: -.02em; }
+  .url { font-size: 52px; color: #22d3ee; font-weight: 600; }
+
+  /* Story progress bar - reads as "short-form video" at a glance. */
+  .prog { position: absolute; top: 56px; left: 96px; right: 96px; height: 6px;
+          background: rgba(255,255,255,.12); border-radius: 3px; overflow: hidden; }
+  .prog i { display: block; height: 100%; background: #22d3ee; width: 0; }
+
+  /* Vignette + grain stop the flat-black areas from looking like an empty div. */
+  .vig { position: absolute; inset: 0; pointer-events: none;
+         background: radial-gradient(120% 80% at 50% 40%, transparent 40%, rgba(0,0,0,.55)); }
+</style>
+
+<div class="stage">
+  <div class="wash"><i class="w1"></i><i class="w2"></i></div>
+
+  <!-- 1. HOOK -->
+  <div class="beat" id="b1"><div class="pad">
+    <div class="eyebrow" id="b1e">Inferix</div>
+    <h1 style="margin-top:44px">
+      <span id="b1l1" style="white-space:nowrap">Switching providers</span><br>
+      <span id="b1l2" style="white-space:nowrap">usually means</span><br>
+      <span id="b1l3" class="dim" style="white-space:nowrap">rewriting code.</span>
+    </h1>
+  </div></div>
+
+  <!-- 2. THE SWAP -->
+  <div class="beat" id="b2"><div class="pad">
+    <div class="eyebrow" id="b2e">It doesn't here</div>
+    <div class="card" id="b2c" style="margin-top:52px">
+      <div class="chrome"><i class="dot"></i><i class="dot"></i><i class="dot"></i>
+        <span class="fname">app.py</span></div>
+      <div class="code">
+        <span class="ln"><span class="k">from</span> openai <span class="k">import</span> OpenAI</span>
+        <span class="ln"> </span>
+        <span class="ln">client = <span class="f">OpenAI</span>(</span>
+        <span class="ln old" id="b2old">    base_url=<span class="s">"https://api.openai.com/v1"</span>,<span class="strike" id="b2str"></span></span>
+        <span class="ln new" id="b2new">    base_url=<span class="s" id="b2url"></span><span class="caret" id="b2car"></span></span>
+        <span class="ln">    api_key=<span class="f">KEY</span>,</span>
+        <span class="ln">)</span>
+      </div>
+    </div>
+    <div class="sub" id="b2s" style="margin-top:56px">One line. Nothing else changes.</div>
+  </div></div>
+
+  <!-- 3. PROOF -->
+  <div class="beat" id="b3"><div class="pad">
+    <div class="card" id="b3c">
+      <div class="chrome"><i class="dot"></i><i class="dot"></i><i class="dot"></i>
+        <span class="fname">bash</span></div>
+      <div class="term">
+        <span class="ln" id="b3l0"><span class="p">$</span> <span class="o">python app.py</span></span>
+        <span class="ln" id="b3l1"><span class="o" id="b3out"></span><span class="caret" id="b3car"></span></span>
+      </div>
+    </div>
+    <h2 id="b3h" style="margin-top:80px"><span style="white-space:nowrap">Existing SDK code</span><br><span style="white-space:nowrap">runs unmodified.</span></h2>
+  </div></div>
+
+  <!-- 4. CLAIMS -->
+  <div class="beat" id="b4"><div class="pad">
+    <div class="claims">
+      <div class="claim" id="c0"><span class="tick">✓</span><span>Per-second billing</span></div>
+      <div class="claim" id="c1"><span class="tick">✓</span><span>No minimum commitment</span></div>
+      <div class="claim" id="c2"><span class="tick">✓</span><span>Verified GPU hardware</span></div>
+      <div class="claim" id="c3"><span class="tick">✓</span><span>Models, data and compute<br>in one account</span></div>
+    </div>
+  </div></div>
+
+  <!-- 5. CTA -->
+  <div class="beat" id="b5"><div class="pad" style="align-items:center;text-align:center">
+    <div class="logo" id="b5l" style="justify-content:center">
+      <div class="mark">I</div><div class="wordmark">Inferix</div>
+    </div>
+    <div class="sub" id="b5t" style="margin-top:40px;font-size:46px;color:#cbd5e1">
+      The GPU cloud for AI</div>
+    <div class="url" id="b5u" style="margin-top:70px">inferix.co</div>
+  </div></div>
+
+  <div class="vig"></div>
+  <div class="prog"><i id="prog"></i></div>
+</div>
+
+<script>
+const D = 15.0;                       // total duration, seconds
+const NEW_URL = '"https://api.inferix.co/v1"';
+const OUT = 'The capital of France is Paris.';
+
+// Easing. easeOutExpo for entrances - it arrives fast and settles, which is
+// what makes motion read as designed rather than linear and mechanical.
+const clamp = (x) => x < 0 ? 0 : x > 1 ? 1 : x;
+const outExpo = (x) => x >= 1 ? 1 : 1 - Math.pow(2, -10 * x);
+const outCubic = (x) => 1 - Math.pow(1 - x, 3);
+
+// Normalised progress through [a,b], eased.
+const seg = (t, a, b, ease = outExpo) => ease(clamp((t - a) / (b - a)));
+
+const $ = (id) => document.getElementById(id);
+const set = (el, o, y = 0, s = 1) => {
+  el.style.opacity = o;
+  el.style.transform = `translateY(${y}px) scale(${s})`;
+};
+// Entrance used everywhere: 18px up, a hair of scale, staggered by index.
+const rise = (el, t, start, i = 0, dur = 0.55) => {
+  const p = seg(t, start + i * 0.075, start + i * 0.075 + dur);
+  set(el, p, (1 - p) * 18, 0.995 + p * 0.005);
+};
+
+// Beat windows. Hard cuts, not cross-fades: a cut reads as edited, a
+// cross-dissolve on every boundary reads as a slideshow.
+const BEATS = [
+  ['b1', 0.00, 3.10],
+  ['b2', 3.10, 8.30],
+  ['b3', 8.30, 11.30],
+  ['b4', 11.30, 13.30],
+  ['b5', 13.30, 15.00],
+];
+
+window.__frame = function (t) {
+  for (const [id, a, b] of BEATS) {
+    const on = t >= a && t < b;
+    const el = $(id);
+    el.style.opacity = on ? 1 : 0;
+    // Kept in the layout either way; toggling display would force a reflow
+    // mid-render and occasionally reflow fonts differently between frames.
+    el.style.visibility = on ? 'visible' : 'hidden';
+  }
+  $('prog').style.width = (clamp(t / D) * 100) + '%';
+
+  // --- 1. hook ---------------------------------------------------------
+  {
+    const a = 0.0;
+    rise($('b1e'), t, a + 0.05);
+    rise($('b1l1'), t, a + 0.25, 0);
+    rise($('b1l2'), t, a + 0.25, 1);
+    rise($('b1l3'), t, a + 0.25, 2);
+  }
+
+  // --- 2. the swap -----------------------------------------------------
+  {
+    const a = 3.10;
+    rise($('b2e'), t, a + 0.05);
+    const cp = seg(t, a + 0.15, a + 0.85);
+    set($('b2c'), cp, (1 - cp) * 26, 0.985 + cp * 0.015);
+
+    // Strike the old line, then type the new one. Sequential, so the eye is
+    // told what is being replaced before the replacement appears.
+    const sp = seg(t, a + 1.15, a + 1.85, outCubic);
+    $('b2str').style.width = (sp * 100) + '%';
+    $('b2old').style.opacity = 1 - 0.45 * sp;
+
+    const typeStart = a + 2.00, typeEnd = a + 3.40;
+    const chars = Math.round(seg(t, typeStart, typeEnd, outCubic) * NEW_URL.length);
+    $('b2url').textContent = NEW_URL.slice(0, chars);
+    // Caret blinks at 2Hz while typing, then disappears - a caret left
+    // blinking under finished text reads as unfinished.
+    const typing = t >= typeStart && t < typeEnd + 0.35;
+    $('b2car').style.opacity = typing ? (Math.floor(t * 2) % 2 ? 0.25 : 1) : 0;
+    $('b2new').style.opacity = t >= typeStart ? 1 : 0;
+
+    rise($('b2s'), t, a + 3.70);
+  }
+
+  // --- 3. proof --------------------------------------------------------
+  {
+    const a = 8.30;
+    const cp = seg(t, a + 0.05, a + 0.65);
+    set($('b3c'), cp, (1 - cp) * 22, 0.99 + cp * 0.01);
+    const n = Math.round(seg(t, a + 0.70, a + 1.70, outCubic) * OUT.length);
+    $('b3out').textContent = OUT.slice(0, n);
+    const typing = t >= a + 0.70 && t < a + 2.05;
+    $('b3car').style.opacity = typing ? (Math.floor(t * 2) % 2 ? 0.25 : 1) : 0;
+    rise($('b3h'), t, a + 1.95);
+  }
+
+  // --- 4. claims -------------------------------------------------------
+  {
+    const a = 11.30;
+    for (let i = 0; i < 4; i++) rise($('c' + i), t, a + 0.05, i, 0.5);
+  }
+
+  // --- 5. cta ----------------------------------------------------------
+  {
+    const a = 13.30;
+    const p = seg(t, a + 0.05, a + 0.75);
+    set($('b5l'), p, (1 - p) * 20, 0.97 + p * 0.03);
+    rise($('b5t'), t, a + 0.30);
+    rise($('b5u'), t, a + 0.55);
+  }
+};
+// Fit any nowrap line to the content box. Copy is generated, so a headline
+// that overflows at a hardcoded size is a matter of when, not if - the first
+// version of this clipped "Switching providers" off the right edge. Shrink
+// until it fits rather than trusting a number chosen against one sentence.
+function fitText(root) {
+  root.querySelectorAll('h1, h2').forEach((el) => {
+    // clientWidth INCLUDES padding on a border-box element, so measuring
+    // against it compares a line to the full 1080px frame and passes while
+    // the text is visibly clipped. Subtract the padding to get the box the
+    // text actually has.
+    const cs = getComputedStyle(el.parentElement);
+    const box = el.parentElement.clientWidth
+      - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+    let size = parseFloat(getComputedStyle(el).fontSize);
+    const widest = () => Math.max(...[...el.querySelectorAll('span')]
+      .map((s) => s.getBoundingClientRect().width), 0);
+    let guard = 40;
+    while (widest() > box && size > 40 && guard-- > 0) {
+      size -= 3;
+      el.style.fontSize = size + 'px';
+    }
+  });
+}
+fitText(document);
+window.__frame(0);
+</script>

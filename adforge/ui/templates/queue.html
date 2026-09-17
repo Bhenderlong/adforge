@@ -44,6 +44,22 @@
         {% endfor %}
       </select>
     </div>
+    <div style="min-width:150px">
+      <label>Media</label>
+      <select name="media" onchange="this.form.submit()">
+        <option value="">any</option>
+        <option value="video" {{ 'selected' if f_media == 'video' }}>has video</option>
+        <option value="image" {{ 'selected' if f_media == 'image' }}>has image</option>
+        <option value="none"  {{ 'selected' if f_media == 'none' }}>no media</option>
+      </select>
+    </div>
+    <div style="min-width:150px">
+      <label>Order</label>
+      <select name="newest" onchange="this.form.submit()">
+        <option value="">by scheduled time</option>
+        <option value="1" {{ 'selected' if f_newest }}>newest first</option>
+      </select>
+    </div>
     <div class="right"><a class="btn sm" href="/queue">clear filters</a></div>
   </div>
 </form>

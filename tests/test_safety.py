@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import pathlib
+import re
 
 import pytest
 
@@ -701,3 +702,54 @@ def test_i2v_without_loras_still_uses_the_raw_models():
     assert "1a" not in g and "2a" not in g
     assert g["9"]["inputs"]["model"] == ["1", 0]
     assert g["10"]["inputs"]["model"] == ["2", 0]
+
+
+def test_compose_can_produce_video_not_only_images():
+    """Compose had its own image-only branch.
+
+    supports_image is False for YouTube and TikTok, so a hand-composed post for
+    either came out with NO media at all - no image, no video, no error. The
+    scheduled path produced video all along, which made this look like "video
+    is broken" rather than "Compose cannot make one".
+    """
+    src = pathlib.Path("adforge/ui/app.py").read_text()
+    body = src.split("def _compose_job", 1)[1].split("\n@app.", 1)[0]
+    assert "_attach_media(" in body, "compose must use the shared media path"
+    assert "ps.supports_image" not in body, \
+        "compose must not gate media on supports_image - that skips video"
+
+
+def test_motion_templates_declare_the_frame_hook():
+    """render() drives the animation by calling window.__frame(t).
+
+    A template relying on CSS transitions or requestAnimationFrame renders
+    whatever the wall clock happened to be during the screenshot, so the same
+    input produces a different video every pass.
+    """
+    import glob
+
+    files = glob.glob("adforge/media/shorts/*.html")
+    assert files, "no shorts templates found"
+    for f in files:
+        src = pathlib.Path(f).read_text()
+        assert "window.__frame" in src, f"{f} has no __frame hook"
+        # Strip comments first: the template explains WHY it avoids these, and
+        # matching the prose made the test fail on its own documentation.
+        code = re.sub(r"<!--.*?-->", "", src, flags=re.S)
+        code = re.sub(r"/\*.*?\*/", "", code, flags=re.S)
+        code = re.sub(r"(?m)^\s*//.*$", "", code)
+        assert "requestAnimationFrame" not in code, f"{f} animates itself"
+        assert "transition:" not in code, f"{f} uses CSS transitions"
+
+
+def test_text_fitting_measures_the_content_box_not_the_padded_box():
+    """clientWidth includes padding on a border-box element.
+
+    Measuring against it compares a headline to the full 1080px frame, so the
+    check passes while the text is visibly clipped - which is exactly what it
+    did on the first render.
+    """
+    src = pathlib.Path("adforge/media/shorts/endpoint_swap.html").read_text()
+    fit = src.split("function fitText", 1)[1].split("\n}", 1)[0]
+    assert "paddingLeft" in fit and "paddingRight" in fit, \
+        "fitText must subtract padding from clientWidth"

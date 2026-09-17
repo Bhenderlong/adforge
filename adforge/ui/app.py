@@ -16,6 +16,7 @@ import datetime as dt
 import json
 import logging
 import os
+import random
 import re
 import subprocess
 import threading
@@ -500,9 +501,18 @@ def api_status():
 
 
 @app.get("/queue", response_class=HTMLResponse)
-def queue(request: Request, brand: str = "", platform: str = "", status: str = ""):
+def queue(request: Request, brand: str = "", platform: str = "",
+          status: str = "", media: str = "", newest: str = ""):
     with session_scope() as s:
         q = s.query(Post)
+        if media == "video":
+            q = q.filter(Post.video_path != "", Post.video_path.isnot(None))
+        elif media == "image":
+            q = q.filter(Post.image_path != "", Post.image_path.isnot(None))
+        elif media == "none":
+            q = q.filter(
+                (Post.video_path == "") | (Post.video_path.is_(None)),
+                (Post.image_path == "") | (Post.image_path.is_(None)))
         if brand:
             q = q.filter(Post.brand == brand)
         if platform:
@@ -516,13 +526,20 @@ def queue(request: Request, brand: str = "", platform: str = "", status: str = "
                 raise HTTPException(
                     400, f"{status!r} is not a post status. Valid values: "
                          + ", ".join(p.value for p in PostStatus)) from None
-        posts = q.order_by(Post.scheduled_for.desc().nullslast(),
-                           Post.id.desc()).limit(200).all()
+        # Sorting by scheduled_for buries a post you just made: its slot can
+        # be older than two dozen others, so the newest work lands 20 rows
+        # down among 60 with nothing marking it as new.
+        if newest:
+            posts = q.order_by(Post.id.desc()).limit(200).all()
+        else:
+            posts = q.order_by(Post.scheduled_for.desc().nullslast(),
+                               Post.id.desc()).limit(200).all()
         counts = _status_counts(s)
     return templates.TemplateResponse(
         request, "queue.html",
         ctx(request, posts=posts, counts=counts, f_brand=brand,
-            f_platform=platform, f_status=status, statuses=list(PostStatus)),
+            f_platform=platform, f_status=status, statuses=list(PostStatus),
+            f_media=media, f_newest=newest),
     )
 
 
@@ -769,9 +786,8 @@ def compose_submit(
 
 
 def _compose_job(brand_key, platform, pillar_key, angle, with_media, when) -> str:
-    from ..llm.copywriter import media_prompt, write_post
-    from ..media.images import generate_image
-    from ..scheduler.planner import recent_bodies
+    from ..llm.copywriter import write_post
+    from ..scheduler.planner import _attach_media, recent_bodies
 
     brand = get_brand(brand_key)
     ps = spec(platform)
@@ -816,12 +832,16 @@ def _compose_job(brand_key, platform, pillar_key, angle, with_media, when) -> st
         # account, approving a post - would block for busy_timeout and then
         # return a 500. This is the same trap already fixed in
         # scheduler/planner.fill_slot; Compose still had it.
-        if with_media and ps.supports_image:
+        # Reuse the planner's _attach_media rather than reimplementing it.
+        # Compose had its own image-only branch, so a YouTube or TikTok post
+        # composed by hand came out with NO media at all: supports_image is
+        # False for those, and there was no video branch to fall through to.
+        # The scheduled path has produced video all along, which is why this
+        # looked like "video is broken" rather than "Compose cannot make one".
+        if with_media:
             slug = f"{brand_key}_{platform}_{uuid.uuid4().hex[:10]}"
             try:
-                prompt = media_prompt(brand, draft.text, draft.angle)
-                post.media_prompt = prompt
-                post.image_path = str(generate_image(brand, ps, prompt, slug))
+                _attach_media(brand, post, ps, draft, random.Random(), slug)
             except Exception as e:  # noqa: BLE001 - never lose the copy
                 log.warning("compose media failed for %s: %s", slug, e)
                 post.critic_notes = (
