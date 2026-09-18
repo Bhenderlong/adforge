@@ -108,6 +108,11 @@ class Settings(BaseSettings):
     # image-to-video path. Motion is the default because generated b-roll with
     # captions over it does not read as a professional ad in this market, and
     # it renders in 40 seconds rather than 11 minutes.
+    # Drop licensed tracks in here (data/music) and shorts get a bed. Empty
+    # or missing means a SILENT aac stream is still written - see motion.py.
+    music_dir: str = "data/music"
+    music_gain_db: float = -20.0
+    music_fade_seconds: float = 1.2
     video_engine: str = "motion"
     short_template: str = "statement"
     media_sync_target: str = ""

@@ -20,11 +20,12 @@ in isolation instead of scrubbing a video.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import subprocess
 from pathlib import Path
 
-from ..config import ASSETS, settings
+from ..config import ASSETS, ROOT, settings
 
 log = logging.getLogger("adforge.motion")
 
@@ -105,9 +106,77 @@ def render(
     if r.returncode:
         raise MotionError(f"ffmpeg failed: {(r.stderr or '')[:400]}")
 
+    _add_audio(out, seconds)
+
     for f in tmp.glob("*.png"):
         f.unlink()
     tmp.rmdir()
     log.info("motion render %s: %d frames @%dfps -> %.1f MB",
              out.name, frames, fps, out.stat().st_size / 1e6)
     return out
+
+
+MUSIC_SUFFIXES = (".mp3", ".m4a", ".wav", ".aac", ".flac", ".ogg")
+
+
+def pick_track(seed: str) -> Path | None:
+    """A track from settings.music_dir, chosen deterministically by `seed`.
+
+    Deterministic so a re-render of the same post keeps the same bed - a short
+    that changes music every time it is regenerated is impossible to review.
+    """
+    d = Path(settings.music_dir)
+    if not d.is_absolute():
+        d = ROOT / d
+    if not d.is_dir():
+        return None
+    tracks = sorted(p for p in d.iterdir()
+                    if p.suffix.lower() in MUSIC_SUFFIXES and p.stat().st_size > 4096)
+    if not tracks:
+        return None
+    n = int(hashlib.sha256(seed.encode()).hexdigest()[:8], 16)
+    return tracks[n % len(tracks)]
+
+
+def _add_audio(video: Path, seconds: float) -> None:
+    """Give the file an audio stream: a music bed if available, else silence.
+
+    A video with NO audio stream at all is not merely quiet. Some platform
+    encoders and players treat it as malformed, and TikTok in particular has
+    rejected uploads over it, so silence is written explicitly rather than
+    left absent.
+    """
+    track = pick_track(video.stem)
+    tmp = video.with_suffix(".withaudio.mp4")
+    fade = max(0.1, min(settings.music_fade_seconds, seconds / 3))
+
+    if track:
+        filt = (f"volume={settings.music_gain_db}dB,"
+                f"afade=t=in:st=0:d={fade:.2f},"
+                f"afade=t=out:st={seconds - fade:.2f}:d={fade:.2f}")
+        cmd = [settings.ffmpeg, "-y", "-loglevel", "error", "-i", str(video),
+               # -stream_loop so a track shorter than the short still fills it.
+               "-stream_loop", "-1", "-i", str(track),
+               "-filter_complex", f"[1:a]{filt}[a]",
+               "-map", "0:v", "-map", "[a]", "-t", f"{seconds:.3f}",
+               "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+               "-movflags", "+faststart", str(tmp)]
+    else:
+        cmd = [settings.ffmpeg, "-y", "-loglevel", "error", "-i", str(video),
+               "-f", "lavfi", "-i",
+               "anullsrc=channel_layout=stereo:sample_rate=48000",
+               "-map", "0:v", "-map", "1:a", "-t", f"{seconds:.3f}",
+               "-c:v", "copy", "-c:a", "aac", "-b:a", "96k",
+               "-movflags", "+faststart", str(tmp)]
+
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode:
+        # Not fatal: a short with no audio stream is still a usable short, and
+        # failing the whole render over the bed would be the wrong trade.
+        log.warning("could not attach audio to %s: %s",
+                    video.name, (r.stderr or "")[:200])
+        tmp.unlink(missing_ok=True)
+        return
+    tmp.replace(video)
+    log.info("audio: %s", track.name if track else "silent stream (no tracks in "
+             f"{settings.music_dir})")

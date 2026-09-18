@@ -797,3 +797,33 @@ def test_the_no_motion_warning_does_not_fire_on_the_motion_path():
     src = pathlib.Path("adforge/scheduler/planner.py").read_text()
     block = src.split("stills = ", 1)[1][:240]
     assert 'video_engine != "motion"' in block
+
+
+def test_every_short_gets_an_audio_stream_even_with_no_music():
+    """A file with NO audio stream is not merely quiet.
+
+    Some platform encoders treat it as malformed, so silence is written
+    explicitly rather than left absent.
+    """
+    src = pathlib.Path("adforge/media/motion.py").read_text()
+    body = src.split("def _add_audio", 1)[1]
+    assert "anullsrc" in body, "must write a silent stream when no track exists"
+    assert "_add_audio(out, seconds)" in src, "render() must call it"
+
+
+def test_music_selection_is_deterministic():
+    """Re-rendering to review a copy change must not also change the music."""
+    src = pathlib.Path("adforge/media/motion.py").read_text()
+    body = src.split("def pick_track", 1)[1].split("\ndef ", 1)[0]
+    assert "sha256" in body and "sorted(" in body
+    assert "random" not in body
+
+
+def test_no_music_is_committed_to_the_repo():
+    """Nothing here is licensed for redistribution."""
+    d = pathlib.Path("data/music")
+    if not d.is_dir():
+        return
+    audio = [p.name for p in d.iterdir()
+             if p.suffix.lower() in (".mp3", ".m4a", ".wav", ".aac", ".flac", ".ogg")]
+    assert not audio, f"audio files present in data/music: {audio}"
