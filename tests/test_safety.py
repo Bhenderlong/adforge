@@ -785,3 +785,15 @@ def test_motion_is_the_default_video_engine():
     from adforge.config import Settings
 
     assert Settings.model_fields["video_engine"].default == "motion"
+
+
+def test_the_no_motion_warning_does_not_fire_on_the_motion_path():
+    """Scene.animated is never set when rendering motion graphics.
+
+    The check reported "NO REAL MOTION in 8/8 scenes" on a correct render and
+    pinned the post to MANUAL. A warning that fires on healthy output trains
+    you to ignore the real one.
+    """
+    src = pathlib.Path("adforge/scheduler/planner.py").read_text()
+    block = src.split("stills = ", 1)[1][:240]
+    assert 'video_engine != "motion"' in block

@@ -72,6 +72,37 @@ Reply with ONLY this JSON:
 """
 
 
+# Replaces the framing and caption-length guidance when the short is rendered
+# as motion graphics. There is no b-roll to sit on top of: the words ARE the
+# visual, so an 8-word caption written to overlay an image becomes a headline
+# with nothing behind it. "Batch size kills" is a fine caption and a useless
+# argument; the same beat as a full clause is a sentence someone can learn
+# from.
+MOTION_FRAMING = """
+OVERRIDE - ignore the 8-word caption maximum and the JSON hint that repeats
+it. On this path a caption may be up to 11 words, and scenes 2-4 SHOULD be
+8 to 11: they are the argument, not a label on a picture.
+
+FRAMING - this is a TYPOGRAPHIC short. There is no footage: your captions are
+the only thing on screen, set large on a plain brand background. So:
+
+  - Scene 1 is the HOOK. A specific, concrete claim, 3 to 9 words.
+  - Scenes 2-4 carry the ARGUMENT. Each is one COMPLETE SENTENCE of 8 to 11
+    words stating a mechanism, with a subject and a verb.
+      GOOD: "The KV cache grows with context, not with parameter count."
+      GOOD: "Two 24GB cards cannot pool memory into one 48GB pool."
+      BAD:  "Context length matters."      (a label, not a point)
+      BAD:  "Batch size is not key."       (says nothing mechanical)
+    If a line would fit on a slide title, it is too short. Rewrite it as the
+    sentence you would say out loud to explain the mechanism.
+  - The LAST scene is the payoff: what the viewer should now do differently.
+  - `visual` and `motion` are ignored on this path; send empty strings.
+
+Do not write anything that needs an image to make sense - no "as you can see",
+no pointing at things.
+"""
+
+
 # Used when scrubbing leaves nothing usable. Deliberately plain: a clean
 # recognisable object beats an incoherent one.
 FALLBACK_SUBJECT = (
@@ -140,6 +171,13 @@ def _sanitize(text: str) -> str:
     return re.sub(r"\s+", " ", t).strip()
 
 
+def _framing() -> str:
+    """The framing guidance for whichever renderer will draw this."""
+    from ..config import settings
+
+    return MOTION_FRAMING if settings.video_engine == "motion" else ""
+
+
 def write_script(
     brand: Brand,
     ps: PlatformSpec,
@@ -182,7 +220,8 @@ Write exactly {n_scenes} scenes totalling about {target} seconds."""
 
     with gpu(TEXT):
         data = chat_json(
-            [{"role": "system", "content": SYSTEM}, {"role": "user", "content": user}],
+            [{"role": "system", "content": SYSTEM + _framing()},
+             {"role": "user", "content": user}],
             models=settings.writer_chain,
             temperature=0.9,
             max_tokens=1600,

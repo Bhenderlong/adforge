@@ -326,7 +326,14 @@ def _attach_media(brand, post: Post, ps, draft, rng, slug: str) -> None:
         # Surface a degraded render. The Ken Burns fallback looks fine in
         # isolation, so a broken Wan config would quietly turn every short into
         # a slideshow. Force a human look rather than shipping that unnoticed.
-        stills = [s for s in script.scenes if not s.animated]
+        #
+        # Only meaningful for the Wan path. Scene.animated is never set on the
+        # motion path - there are no Wan scenes to animate - so this check
+        # reported "NO REAL MOTION in 8/8 scenes" on a correct motion-graphics
+        # render and pinned it to MANUAL. A warning that fires on healthy
+        # output is worse than none: it trains you to ignore the real one.
+        stills = ([s for s in script.scenes if not s.animated]
+                  if settings.video_engine != "motion" else [])
         if stills:
             reason = next((s.fallback_reason for s in stills if s.fallback_reason), "")
             post.mode = PostMode.MANUAL
