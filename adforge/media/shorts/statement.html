@@ -1,0 +1,192 @@
+<!doctype html>
+<meta charset="utf-8">
+<!--
+  Statement short: typography only, for a claim with nothing to put on screen.
+
+  This is the default for scheduled video, because most posts are an argument
+  rather than a demo. Same contract as every template here: render from
+  window.__DATA, expose window.__frame(t), animate nothing by itself.
+-->
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1080px; height: 1920px; overflow: hidden; }
+  body { background: #07090d; color: #e8eef5;
+         font-family: Inter, "Helvetica Neue", system-ui, sans-serif;
+         -webkit-font-smoothing: antialiased; }
+  .stage { position: absolute; inset: 0; }
+  .beat { position: absolute; inset: 0; opacity: 0; }
+  .wash { position: absolute; inset: -20%; filter: blur(130px); opacity: .5; }
+  .wash i { position: absolute; border-radius: 50%; display: block; }
+  .w1 { width: 900px; height: 900px; background: #0891b2; left: -12%; top: 6%; }
+  .w2 { width: 780px; height: 780px; background: #155e75; right: -14%; bottom: 6%; }
+  .pad { position: absolute; inset: 0; padding: 200px 88px 280px;
+         display: flex; flex-direction: column; justify-content: center; }
+  .eyebrow { font-size: 30px; font-weight: 600; letter-spacing: .22em;
+             text-transform: uppercase; color: #22d3ee; }
+  h1 { font-size: 112px; line-height: 1.05; font-weight: 700; letter-spacing: -.03em; }
+  h1 .dim { color: #64748b; }
+  h2 { font-size: 90px; line-height: 1.08; font-weight: 700; letter-spacing: -.025em; }
+
+  /* Points: a rule that draws itself in, then the line. Reads as an argument
+     being made rather than a bullet list appearing. */
+  .pt { display: flex; gap: 34px; align-items: flex-start; }
+  .pt + .pt { margin-top: 64px; }
+  .bar { width: 6px; background: #22d3ee; border-radius: 3px; flex: 0 0 6px; height: 0; }
+  .pt p { font-size: 58px; line-height: 1.24; font-weight: 550; }
+
+  .claims { display: flex; flex-direction: column; gap: 54px; }
+  .claim { display: flex; align-items: center; gap: 32px; font-size: 54px; font-weight: 550; }
+  .tick { width: 62px; height: 62px; border-radius: 50%; flex: 0 0 62px;
+          background: rgba(34,211,238,.12); border: 2px solid #22d3ee;
+          display: flex; align-items: center; justify-content: center;
+          color: #22d3ee; font-size: 34px; font-weight: 700; }
+
+  .logo { display: flex; align-items: center; gap: 26px; justify-content: center; }
+  .mark { width: 128px; height: 128px; border-radius: 26px;
+          background: linear-gradient(140deg, #22d3ee, #0e7490);
+          display: flex; align-items: center; justify-content: center;
+          font-size: 70px; font-weight: 800; color: #04252c; }
+  .wordmark { font-size: 92px; font-weight: 700; letter-spacing: -.02em; }
+  .sub { font-size: 46px; line-height: 1.35; color: #cbd5e1; font-weight: 450; }
+  .url { font-size: 52px; color: #22d3ee; font-weight: 600; }
+  .prog { position: absolute; top: 56px; left: 96px; right: 96px; height: 6px;
+          background: rgba(255,255,255,.12); border-radius: 3px; overflow: hidden; }
+  .prog i { display: block; height: 100%; background: #22d3ee; width: 0; }
+  .vig { position: absolute; inset: 0; pointer-events: none;
+         background: radial-gradient(120% 80% at 50% 40%, transparent 40%, rgba(0,0,0,.55)); }
+</style>
+
+<div class="stage">
+  <div class="wash"><i class="w1"></i><i class="w2"></i></div>
+
+  <div class="beat" id="b1"><div class="pad">
+    <div class="eyebrow" id="b1e"></div>
+    <h1 style="margin-top:44px">
+      <span id="b1l1" style="white-space:nowrap"></span><br>
+      <span id="b1l2" style="white-space:nowrap"></span><br>
+      <span id="b1l3" class="dim" style="white-space:nowrap"></span>
+    </h1>
+  </div></div>
+
+  <div class="beat" id="b2"><div class="pad"><div id="pts"></div></div></div>
+
+  <div class="beat" id="b3"><div class="pad">
+    <h2><span id="b3k1" style="white-space:nowrap"></span><br>
+        <span id="b3k2" style="white-space:nowrap"></span></h2>
+  </div></div>
+
+  <div class="beat" id="b4"><div class="pad"><div class="claims"></div></div></div>
+
+  <div class="beat" id="b5"><div class="pad" style="align-items:center;text-align:center">
+    <div class="logo" id="b5l"><div class="mark" id="b5m"></div>
+      <div class="wordmark" id="b5w"></div></div>
+    <div class="sub" id="b5t" style="margin-top:40px"></div>
+    <div class="url" id="b5u" style="margin-top:70px"></div>
+  </div></div>
+
+  <div class="vig"></div>
+  <div class="prog"><i id="prog"></i></div>
+</div>
+
+<!--DATA-->
+<script>
+const D = 13.0;
+const DATA = window.__DATA || {};
+const B = DATA.brand || {};
+const T = {
+  eyebrow: DATA.eyebrow || (B.name || "Inferix"),
+  hook_a: DATA.hook_a || "A 7B in fp16 needs",
+  hook_b: DATA.hook_b || "14GB before any",
+  hook_dim: DATA.hook_dim || "KV cache at all.",
+  points: DATA.points || ["Weights are the floor, not the budget.",
+                          "Context length is what actually OOMs you.",
+                          "A 24GB card buys headroom, not a bigger model."],
+  kicker_a: DATA.kicker_a || "Size the card for",
+  kicker_b: DATA.kicker_b || "the context, not the model.",
+  claims: DATA.claims || ["Per-second billing", "No minimum commitment",
+                          "Verified GPU hardware"],
+  tagline: DATA.tagline || B.tagline || "The GPU cloud for AI",
+};
+
+if (B.accent) {
+  document.querySelectorAll('.eyebrow,.url,.tick').forEach(e => e.style.color = B.accent);
+  document.querySelectorAll('.prog i,.bar').forEach(e => e.style.background = B.accent);
+  document.querySelectorAll('.tick').forEach(e => e.style.borderColor = B.accent);
+  document.querySelector('.w1').style.background = B.wash_a || B.accent;
+  document.querySelector('.w2').style.background = B.wash_b || B.accent_deep;
+  document.querySelector('.mark').style.background =
+    `linear-gradient(140deg, ${B.accent}, ${B.accent_deep})`;
+}
+
+const $ = (id) => document.getElementById(id);
+const put = (id, v) => { const e = $(id); if (e) e.textContent = v; };
+put('b1e', T.eyebrow); put('b1l1', T.hook_a); put('b1l2', T.hook_b);
+put('b1l3', T.hook_dim); put('b3k1', T.kicker_a); put('b3k2', T.kicker_b);
+put('b5m', B.mark || 'I'); put('b5w', B.name || 'Inferix');
+put('b5t', T.tagline); put('b5u', B.url || 'inferix.co');
+$('pts').innerHTML = T.points.slice(0, 3).map((p, i) =>
+  `<div class="pt" id="p${i}"><i class="bar" id="pb${i}"></i><p>${p}</p></div>`).join('');
+if (B.accent) document.querySelectorAll('.bar').forEach(e => e.style.background = B.accent);
+document.querySelector('.claims').innerHTML = T.claims.slice(0, 4).map((c, i) =>
+  `<div class="claim" id="c${i}"><span class="tick">✓</span><span>${c}</span></div>`).join('');
+
+const clamp = (x) => x < 0 ? 0 : x > 1 ? 1 : x;
+const outExpo = (x) => x >= 1 ? 1 : 1 - Math.pow(2, -10 * x);
+const outCubic = (x) => 1 - Math.pow(1 - x, 3);
+const seg = (t, a, b, e = outExpo) => e(clamp((t - a) / (b - a)));
+const set = (el, o, y = 0, s = 1) => {
+  el.style.opacity = o; el.style.transform = `translateY(${y}px) scale(${s})`; };
+const rise = (el, t, start, i = 0, dur = 0.55) => {
+  if (!el) return;
+  const p = seg(t, start + i * 0.075, start + i * 0.075 + dur);
+  set(el, p, (1 - p) * 18, 0.995 + p * 0.005);
+};
+
+function fitText(root) {
+  root.querySelectorAll('h1, h2').forEach((el) => {
+    const cs = getComputedStyle(el.parentElement);
+    const box = el.parentElement.clientWidth
+      - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+    let size = parseFloat(getComputedStyle(el).fontSize), guard = 40;
+    const widest = () => Math.max(...[...el.querySelectorAll('span')]
+      .map((s) => s.getBoundingClientRect().width), 0);
+    while (widest() > box && size > 40 && guard-- > 0) {
+      size -= 3; el.style.fontSize = size + 'px';
+    }
+  });
+}
+fitText(document);
+
+const BEATS = [['b1',0.0,3.0],['b2',3.0,7.6],['b3',7.6,9.9],
+               ['b4',9.9,11.6],['b5',11.6,13.0]];
+
+window.__frame = function (t) {
+  for (const [id, a, b] of BEATS) {
+    const on = t >= a && t < b, el = $(id);
+    el.style.opacity = on ? 1 : 0;
+    el.style.visibility = on ? 'visible' : 'hidden';
+  }
+  $('prog').style.width = (clamp(t / D) * 100) + '%';
+
+  rise($('b1e'), t, 0.05);
+  rise($('b1l1'), t, 0.25, 0); rise($('b1l2'), t, 0.25, 1); rise($('b1l3'), t, 0.25, 2);
+
+  for (let i = 0; i < 3; i++) {
+    const a = 3.0 + i * 0.95;
+    rise($('p' + i), t, a + 0.05, 0, 0.5);
+    // The rule grows to the line's height, so the mark and the words arrive
+    // together instead of the bullet appearing fully formed first.
+    const el = $('p' + i), bar = $('pb' + i);
+    if (bar && el) bar.style.height =
+      (seg(t, a + 0.10, a + 0.60, outCubic) * el.querySelector('p').offsetHeight) + 'px';
+  }
+
+  rise($('b3k1'), t, 7.65, 0); rise($('b3k2'), t, 7.65, 1);
+  for (let i = 0; i < 4; i++) rise($('c' + i), t, 9.95, i, 0.45);
+
+  const p = seg(t, 11.65, 12.35);
+  set($('b5l'), p, (1 - p) * 20, 0.97 + p * 0.03);
+  rise($('b5t'), t, 11.90); rise($('b5u'), t, 12.10);
+};
+window.__frame(0);
+</script>

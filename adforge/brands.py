@@ -35,6 +35,12 @@ class Brand:
     visual: dict
     voice: dict
     hard_rules: list[str] = field(default_factory=list)
+    # Short forms of the proof points, for places with a hard character
+    # budget - a claim on a video frame, at most ~32 characters. Kept
+    # explicit rather than truncated: cutting "Per-second billing with no
+    # minimum commitment" to fit produces "Per-second billing with no",
+    # which says the opposite of what it means.
+    short_claims: list[str] = field(default_factory=list)
     # Hand-written model posts, shown to the writer as in-context examples.
     # Describing the register does not teach it; showing it does.
     exemplars: list[str] = field(default_factory=list)

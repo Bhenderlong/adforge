@@ -21,6 +21,13 @@ audience: >
 
 # Concrete, verifiable differentiators. The copywriter may only make claims
 # that appear here - this is the guard against the model inventing benchmarks.
+short_claims:
+  - OpenAI-compatible endpoints
+  - Per-second billing
+  - No minimum commitment
+  - Verified GPU hardware
+  - Models, data and compute in one place
+
 proof_points:
   - "OpenAI-compatible endpoints: change the base URL and existing SDK code works unmodified"
   - Models, datasets, Spaces and GPU rental in one account instead of two vendors

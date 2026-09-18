@@ -134,8 +134,8 @@
         <span class="ln"><span class="k">from</span> openai <span class="k">import</span> OpenAI</span>
         <span class="ln"> </span>
         <span class="ln">client = <span class="f">OpenAI</span>(</span>
-        <span class="ln old" id="b2old">    base_url=<span class="s">"https://api.openai.com/v1"</span>,<span class="strike" id="b2str"></span></span>
-        <span class="ln new" id="b2new">    base_url=<span class="s" id="b2url"></span><span class="caret" id="b2car"></span></span>
+        <span class="ln old" id="b2old"><span id="b2oldtxt"></span><span class="strike" id="b2str"></span></span>
+        <span class="ln new" id="b2new"><span id="b2url"></span><span class="caret" id="b2car"></span></span>
         <span class="ln">    api_key=<span class="f">KEY</span>,</span>
         <span class="ln">)</span>
       </div>
@@ -153,7 +153,7 @@
         <span class="ln" id="b3l1"><span class="o" id="b3out"></span><span class="caret" id="b3car"></span></span>
       </div>
     </div>
-    <h2 id="b3h" style="margin-top:80px"><span style="white-space:nowrap">Existing SDK code</span><br><span style="white-space:nowrap">runs unmodified.</span></h2>
+    <h2 id="b3h" style="margin-top:80px"><span id="b3p1" style="white-space:nowrap"></span><br><span id="b3p2" style="white-space:nowrap"></span></h2>
   </div></div>
 
   <!-- 4. CLAIMS -->
@@ -169,21 +169,76 @@
   <!-- 5. CTA -->
   <div class="beat" id="b5"><div class="pad" style="align-items:center;text-align:center">
     <div class="logo" id="b5l" style="justify-content:center">
-      <div class="mark">I</div><div class="wordmark">Inferix</div>
+      <div class="mark" id="b5m"></div><div class="wordmark" id="b5w"></div>
     </div>
-    <div class="sub" id="b5t" style="margin-top:40px;font-size:46px;color:#cbd5e1">
-      The GPU cloud for AI</div>
-    <div class="url" id="b5u" style="margin-top:70px">inferix.co</div>
+    <div class="sub" id="b5t" style="margin-top:40px;font-size:46px;color:#cbd5e1"></div>
+    <div class="url" id="b5u" style="margin-top:70px"></div>
   </div></div>
 
   <div class="vig"></div>
   <div class="prog"><i id="prog"></i></div>
 </div>
 
+<!--DATA-->
 <script>
-const D = 15.0;                       // total duration, seconds
-const NEW_URL = '"https://api.inferix.co/v1"';
-const OUT = 'The capital of France is Paris.';
+const D = 15.0;
+const DATA = window.__DATA || {};
+const B = DATA.brand || {};
+// Every string on screen comes from DATA when present. The literals below are
+// the defaults that let this file be opened directly in a browser to check a
+// layout change without running the whole pipeline.
+const T = {
+  eyebrow:  DATA.eyebrow  || "It doesn't here",
+  hook_a:   DATA.hook_a   || "Switching providers",
+  hook_b:   DATA.hook_b   || "usually means",
+  hook_dim: DATA.hook_dim || "rewriting code.",
+  old_line: DATA.old_line || '    base_url="https://api.openai.com/v1",',
+  new_line: DATA.new_line || '    base_url="https://api.inferix.co/v1"',
+  swap_note: DATA.swap_note || "One line. Nothing else changes.",
+  output:   DATA.output    || "The capital of France is Paris.",
+  proof_a:  DATA.proof_a   || "Existing SDK code",
+  proof_b:  DATA.proof_b   || "runs unmodified.",
+  claims:   DATA.claims    || ["Per-second billing", "No minimum commitment",
+                               "Verified GPU hardware",
+                               "Models, data and compute in one account"],
+  tagline:  DATA.tagline   || B.tagline || "The GPU cloud for AI",
+};
+
+// Brand theming, so one template serves both companies.
+if (B.accent) {
+  const r = document.documentElement.style;
+  document.querySelectorAll('.eyebrow,.new,.url,.term .p,.tick').forEach(
+    el => el.style.color = B.accent);
+  document.querySelectorAll('.prog i').forEach(el => el.style.background = B.accent);
+  document.querySelectorAll('.tick').forEach(el => el.style.borderColor = B.accent);
+  document.querySelector('.caret') && document.querySelectorAll('.caret').forEach(
+    el => el.style.background = B.accent);
+  document.querySelector('.w1').style.background = B.wash_a || B.accent;
+  document.querySelector('.w2').style.background = B.wash_b || B.accent_deep;
+  document.querySelector('.mark').style.background =
+    `linear-gradient(140deg, ${B.accent}, ${B.accent_deep})`;
+}
+
+// Fill the DOM from T before anything is measured or drawn.
+(function fill() {
+  const put = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
+  put('b1e', B.name || 'Inferix');
+  put('b1l1', T.hook_a); put('b1l2', T.hook_b); put('b1l3', T.hook_dim);
+  put('b2e', T.eyebrow);
+  document.getElementById('b2oldtxt').textContent = T.old_line;
+  put('b2s', T.swap_note);
+  put('b3p1', T.proof_a); put('b3p2', T.proof_b);
+  put('b5w', B.name || 'Inferix');
+  put('b5m', B.mark || 'I');
+  put('b5t', T.tagline);
+  put('b5u', B.url || 'inferix.co');
+  const list = document.querySelector('.claims');
+  list.innerHTML = T.claims.slice(0, 4).map((c, i) =>
+    `<div class="claim" id="c${i}"><span class="tick">\u2713</span><span>${c}</span></div>`
+  ).join('');
+})();                       // total duration, seconds
+const NEW_URL = T.new_line;
+const OUT = T.output;
 
 // Easing. easeOutExpo for entrances - it arrives fast and settles, which is
 // what makes motion read as designed rather than linear and mechanical.

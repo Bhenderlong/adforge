@@ -104,6 +104,12 @@ class Settings(BaseSettings):
     # them set and no LoRA loaded the output is noise.
     wan_steps: int = 4
     wan_cfg: float = 1.0
+    # "motion" renders shorts as HTML motion graphics; "wan" uses the old
+    # image-to-video path. Motion is the default because generated b-roll with
+    # captions over it does not read as a professional ad in this market, and
+    # it renders in 40 seconds rather than 11 minutes.
+    video_engine: str = "motion"
+    short_template: str = "statement"
     media_sync_target: str = ""
     comfy_url: str = "http://127.0.0.1:8189"
     comfy_checkpoint: str = "RealVisXL_V5.0_fp16.safetensors"

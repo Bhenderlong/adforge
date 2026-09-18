@@ -21,6 +21,12 @@ audience: >
   blocked from SaaS GRC tools by residency, sovereignty or customer contract
   terms, plus engineering-led startups facing their first SOC 2.
 
+short_claims:
+  - Runs on your infrastructure
+  - No evidence upload
+  - SOC 2, ISO 27001, HIPAA
+  - Your data never leaves
+
 proof_points:
   - Self-hosted - evidence and audit artefacts never leave your boundary
   - Continuous control monitoring with automated evidence collection

@@ -753,3 +753,35 @@ def test_text_fitting_measures_the_content_box_not_the_padded_box():
     fit = src.split("function fitText", 1)[1].split("\n}", 1)[0]
     assert "paddingLeft" in fit and "paddingRight" in fit, \
         "fitText must subtract padding from clientWidth"
+
+
+def test_frame_claims_are_not_truncated_proof_points():
+    """Cutting a proof point to fit a video frame can invert it.
+
+    "Per-second billing with no minimum commitment" truncated to 34 characters
+    is "Per-second billing with no", which says the opposite. Short copy is
+    declared in the brand file instead.
+    """
+    from adforge.brands import all_brands
+    from adforge.scheduler.planner import _short_data
+    from adforge.media.video import Scene, Script
+
+    src = pathlib.Path("adforge/scheduler/planner.py").read_text()
+    assert "short_claims" in src
+    assert "[p[:34] for p in brand.proof_points" not in src
+
+    for brand in all_brands().values():
+        assert brand.short_claims, f"{brand.key} declares no short_claims"
+        data = _short_data(brand, Script(title="t", scenes=[
+            Scene(caption="a b c d e f", visual="")]))
+        for c in data["claims"]:
+            assert len(c) <= 40, f"{c!r} is too long for a frame"
+            assert not c.endswith(("with no", "and", "the", "of", "in")), \
+                f"{c!r} reads as a truncated sentence"
+
+
+def test_motion_is_the_default_video_engine():
+    """Generated b-roll with captions over it is not an ad in this market."""
+    from adforge.config import Settings
+
+    assert Settings.model_fields["video_engine"].default == "motion"

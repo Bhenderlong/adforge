@@ -252,15 +252,70 @@ def _headline(brand, body: str, ps) -> str:
     return first[:limit]
 
 
+def _short_data(brand, script) -> dict:
+    """Map a generated Script onto the statement template's fields.
+
+    Derived rather than asked for separately: the copy model already produced
+    a title and per-scene captions, and a second LLM call to reshape them is
+    another thing that can fail between a good script and a rendered video.
+    The claims come from the brand's proof points, so nothing on screen is
+    invented for the sake of the layout.
+    """
+    caps = [s.caption.strip() for s in script.scenes if s.caption.strip()]
+
+    def split3(text: str) -> list[str]:
+        """Break one line into three short ones on word boundaries."""
+        words, lines, cur = text.split(), [], ""
+        target = max(1, len(text) // 3)
+        for w in words:
+            if cur and len(cur) + 1 + len(w) > target and len(lines) < 2:
+                lines.append(cur)
+                cur = w
+            else:
+                cur = f"{cur} {w}".strip()
+        lines.append(cur)
+        while len(lines) < 3:
+            lines.append("")
+        return lines[:3]
+
+    hook = split3(caps[0] if caps else script.title)
+    kick = caps[-1] if len(caps) > 1 else script.title
+    kwords = kick.split()
+    mid = max(1, len(kwords) // 2)
+    return {
+        "eyebrow": brand.name,
+        "hook_a": hook[0], "hook_b": hook[1], "hook_dim": hook[2],
+        "points": caps[1:4] if len(caps) > 2 else caps[:3],
+        "kicker_a": " ".join(kwords[:mid]), "kicker_b": " ".join(kwords[mid:]),
+        # short_claims, not truncated proof points: chopping one at 34
+        # characters produced "Per-second billing with no", which inverts it.
+        "claims": (brand.short_claims or brand.proof_points)[:3],
+        "tagline": brand.tagline,
+    }
+
+
+def _render_motion_short(brand, script, slug: str, ps):
+    from ..media.shorts import render_short
+    from ..config import ASSETS
+
+    return render_short(brand, settings.short_template,
+                        _short_data(brand, script),
+                        ASSETS / f"{slug}.mp4", size=ps.video_size)
+
+
 def _attach_media(brand, post: Post, ps, draft, rng, slug: str) -> None:
     from ..media.images import generate_image
 
     if ps.key in VIDEO_FIRST and settings.enable_video and ps.video_size:
         from ..media.script import caption_for, write_script
-        from ..media.video import render_script
 
         script = write_script(brand, ps, brand.pillar(post.pillar), draft.angle)
-        video = render_script(brand, script, slug, ps.video_size)
+        if settings.video_engine == "motion":
+            video = _render_motion_short(brand, script, slug, ps)
+        else:
+            from ..media.video import render_script
+
+            video = render_script(brand, script, slug, ps.video_size)
         post.video_path = str(video)
         post.title = script.title[:95]
         post.body = caption_for(brand, ps, script)
