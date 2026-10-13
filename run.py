@@ -249,7 +249,22 @@ def main() -> int:
             if not (args.client_id or args.secrets_file):
                 print(SETUP_STEPS)
                 return 1
-            creds = youtube_auth(args.client_id, args.client_secret,
+            # Same unechoed prompt as every other platform. This branch was
+            # missed when it was added, so passing --client-id without
+            # --client-secret reached youtube_auth with an empty secret and it
+            # printed the setup instructions - which reads as "your client id
+            # is wrong" rather than "you did not give me the secret".
+            yt_secret = args.client_secret
+            if not yt_secret and not args.secrets_file:
+                import getpass
+
+                yt_secret = getpass.getpass(
+                    "youtube client secret (not echoed): ").strip()
+                if not yt_secret:
+                    print("No client secret given, so there is nothing to "
+                          "authorise with.")
+                    return 1
+            creds = youtube_auth(args.client_id, yt_secret,
                                  args.secrets_file)
             print_result("YouTube", creds)
             return 0
