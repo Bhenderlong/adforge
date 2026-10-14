@@ -1,0 +1,122 @@
+<!doctype html>
+<meta charset="utf-8">
+<!--
+  Typography layer for a cinematic ad. Rendered with a TRANSPARENT background
+  and composited over footage, so this file is deliberately mostly empty space.
+
+  Different rules apply over footage than over a flat colour:
+    - every text block needs a scrim behind it, or it becomes unreadable the
+      moment a bright frame passes underneath
+    - type is heavier and tighter; thin weights disappear over motion
+    - nothing fills the frame, because the footage IS the image
+-->
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1080px; height: 1920px; overflow: hidden; background: transparent; }
+  body { font-family: Inter, "Helvetica Neue", system-ui, sans-serif;
+         -webkit-font-smoothing: antialiased; color: #fff; }
+  .stage { position: absolute; inset: 0; }
+
+  /* A gradient scrim top and bottom. Without it the type is legible on a dark
+     frame and gone on a bright one, and the footage decides which. */
+  .scrim-b { position: absolute; left: 0; right: 0; bottom: 0; height: 46%;
+             background: linear-gradient(to top, rgba(0,0,0,.92), rgba(0,0,0,0)); }
+  .scrim-t { position: absolute; left: 0; right: 0; top: 0; height: 22%;
+             background: linear-gradient(to bottom, rgba(0,0,0,.75), rgba(0,0,0,0)); }
+
+  .lower { position: absolute; left: 88px; right: 88px; bottom: 300px; }
+  .eyebrow { font-size: 30px; font-weight: 700; letter-spacing: .24em;
+             text-transform: uppercase; color: #22d3ee; }
+  h1 { font-size: 104px; line-height: 1.02; font-weight: 800;
+       letter-spacing: -.035em; text-shadow: 0 6px 40px rgba(0,0,0,.8); }
+  h1 .dim { color: #9fb3c8; }
+
+  .rule { height: 5px; width: 0; background: #22d3ee; border-radius: 3px; }
+
+  /* End card: the one beat that does cover the footage, because a CTA
+     competing with moving video is a CTA nobody reads. */
+  .end { position: absolute; inset: 0; background: rgba(5,8,12,.93);
+         display: flex; flex-direction: column; align-items: center;
+         justify-content: center; opacity: 0; }
+  .logo { display: flex; align-items: center; gap: 26px; }
+  .mark { width: 128px; height: 128px; border-radius: 28px;
+          background: linear-gradient(140deg, #22d3ee, #0e7490);
+          display: flex; align-items: center; justify-content: center;
+          font-size: 70px; font-weight: 800; color: #04252c; }
+  .wordmark { font-size: 96px; font-weight: 800; letter-spacing: -.025em; }
+  .tag { font-size: 44px; color: #cbd5e1; margin-top: 36px; font-weight: 500; }
+  .url { font-size: 54px; color: #22d3ee; font-weight: 700; margin-top: 56px; }
+</style>
+
+<div class="stage">
+  <div class="scrim-t" id="st"></div>
+  <div class="scrim-b" id="sb"></div>
+  <div class="lower" id="lower">
+    <div class="eyebrow" id="eye"></div>
+    <div class="rule" id="rule" style="margin:22px 0 26px"></div>
+    <h1><span id="l1"></span><br><span id="l2" class="dim"></span></h1>
+  </div>
+  <div class="end" id="end">
+    <div class="logo"><div class="mark" id="mk"></div><div class="wordmark" id="wm"></div></div>
+    <div class="tag" id="tg"></div>
+    <div class="url" id="ur"></div>
+  </div>
+</div>
+
+<!--DATA-->
+<script>
+const DATA = window.__DATA || {};
+const B = DATA.brand || {};
+const D = DATA.seconds || 15.0;
+// Each entry: [start, end, eyebrow, line1, line2]. One statement per shot,
+// changing on the cut - text that outlives its shot reads as a slideshow.
+const CARDS = DATA.cards || [
+  [0.3, 3.0, "Inferix", "Your model.", "Your compute."],
+  [3.2, 6.0, "One account", "Models, data", "and GPUs."],
+  [6.2, 9.0, "No lock-in", "Per-second billing.", "No minimum."],
+];
+const END = DATA.end_at || 9.6;
+
+if (B.accent) {
+  document.querySelectorAll('.eyebrow,.url').forEach(e => e.style.color = B.accent);
+  document.getElementById('rule').style.background = B.accent;
+  document.getElementById('mk').style.background =
+    `linear-gradient(140deg, ${B.accent}, ${B.accent_deep})`;
+}
+const $ = (id) => document.getElementById(id);
+$('mk').textContent = B.mark || 'I';
+$('wm').textContent = B.name || 'Inferix';
+$('tg').textContent = DATA.tagline || B.tagline || '';
+$('ur').textContent = B.url || 'inferix.co';
+
+const clamp = (x) => x < 0 ? 0 : x > 1 ? 1 : x;
+const outExpo = (x) => x >= 1 ? 1 : 1 - Math.pow(2, -10 * x);
+const seg = (t, a, b, e = outExpo) => e(clamp((t - a) / (b - a)));
+
+window.__frame = function (t) {
+  const card = CARDS.find(c => t >= c[0] && t < c[1]);
+  const ending = t >= END;
+
+  if (card && !ending) {
+    const [a] = card;
+    $('eye').textContent = card[2];
+    $('l1').textContent = card[3];
+    $('l2').textContent = card[4] || '';
+    const p = seg(t, a, a + 0.5);
+    $('lower').style.opacity = p;
+    $('lower').style.transform = `translateY(${(1 - p) * 22}px)`;
+    $('rule').style.width = (seg(t, a + 0.1, a + 0.7) * 160) + 'px';
+    $('sb').style.opacity = p;
+    $('st').style.opacity = p * 0.8;
+  } else {
+    $('lower').style.opacity = 0;
+    $('sb').style.opacity = ending ? 0 : 0.35;
+    $('st').style.opacity = ending ? 0 : 0.3;
+  }
+
+  const e = seg(t, END, END + 0.45);
+  $('end').style.opacity = e;
+  $('end').style.transform = `scale(${0.985 + e * 0.015})`;
+};
+window.__frame(0);
+</script>

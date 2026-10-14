@@ -34,6 +34,53 @@ class MotionError(RuntimeError):
     pass
 
 
+def render_frames(
+    html: str,
+    outdir: Path,
+    *,
+    seconds: float,
+    fps: int = 30,
+    width: int = 1080,
+    height: int = 1920,
+    transparent: bool = False,
+) -> int:
+    """Screenshot each frame into `outdir`. Returns the frame count.
+
+    With transparent=True the page background is omitted, so the PNGs carry an
+    alpha channel and the typography can be composited OVER footage instead of
+    sitting on a flat colour. That is the difference between a title card and
+    an ad.
+    """
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:  # pragma: no cover
+        raise MotionError("playwright is not installed") from None
+
+    frames = int(round(seconds * fps))
+    outdir.mkdir(parents=True, exist_ok=True)
+    for stale in outdir.glob("*.png"):
+        stale.unlink()
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(
+            channel="chrome",
+            args=["--force-device-scale-factor=1", "--hide-scrollbars",
+                  "--disable-lcd-text", "--font-render-hinting=none"],
+        )
+        page = browser.new_page(viewport={"width": width, "height": height})
+        page.set_content(html, wait_until="load")
+        page.evaluate("document.fonts.ready")
+        if not page.evaluate("typeof window.__frame === 'function'"):
+            browser.close()
+            raise MotionError("template does not define window.__frame(t)")
+        for i in range(frames):
+            page.evaluate("t => window.__frame(t)", i / fps)
+            page.screenshot(path=str(outdir / f"{i:05d}.png"),
+                            animations="disabled", omit_background=transparent)
+        browser.close()
+    return frames
+
+
 def render(
     html: str,
     out: Path,
