@@ -65,7 +65,8 @@ MOVES = [
 # one bad hand in one frame is what makes a viewer say "that is AI".
 NEGATIVE = (
     "hands, fingers, people, faces, human figures, crowds, text, letters, "
-    "words, signage, logos, numbers, ui, watermark, subtitles, "
+    "words, lettering, typography, brand names, product names, labels, "
+    "signage, logos, numbers, ui, watermark, subtitles, "
     "morphing, warping, melting, flickering, jitter, duplicated objects, "
     "extra limbs, distorted geometry, cartoon, illustration, cgi render, "
     "lowres, oversaturated, blown highlights"
@@ -101,9 +102,14 @@ def plate_prompt(shot: Shot, i: int) -> str:
     plate cannot be rescued by the video model.
     """
     look = shot.look or LOOKS[i % len(LOOKS)]
+    # No brand or product names anywhere in here. "shot on ARRI Alexa" put
+    # the word ARRI onto the side of a graphics card in the first scheduled
+    # ad - the plate model renders names it is given as lettering in the
+    # image, and lettering is exactly what it cannot spell.
     return (f"cinematic commercial still, {shot.subject}, {look}, "
-            f"shot on ARRI Alexa, photoreal, filmic colour, "
-            f"professional advertising photography, no people")
+            f"large format digital cinema camera, photoreal, filmic colour "
+            f"grade, fine film grain, professional advertising photography, "
+            f"unbranded hardware, blank surfaces, no people")
 
 
 def render_shot(shot: Shot, i: int, slug: str, w: int, h: int,

@@ -88,6 +88,18 @@ def check() -> int:
                       f"({settings.wan_high_noise!r}). They are two halves of a "
                       f"split sampler and must differ.")
                 problems += 1
+            # The step-distillation LoRAs are as load-bearing as the models:
+            # without them 4 steps produces noise, and they vanished once in a
+            # disk cleanup while the config still named them.
+            loras = comfy.list_options("LoraLoaderModelOnly", "lora_name")
+            for name, label in [(settings.wan_lora_high, "wan high-noise lora"),
+                                (settings.wan_lora_low, "wan low-noise lora")]:
+                if name and name not in loras:
+                    print(f"[warn] {label} {name!r} not found - with "
+                          f"wan_steps={settings.wan_steps} the render will be "
+                          f"noise, or fail outright")
+                    problems += 1
+
             vaes = comfy.list_options("VAELoader", "vae_name")
             if settings.wan_vae not in vaes:
                 print(f"[warn] wan vae {settings.wan_vae!r} not found")

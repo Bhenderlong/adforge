@@ -12,6 +12,8 @@ waiting on a 70B model.
 
 from __future__ import annotations
 
+import pathlib
+
 import datetime as dt
 import json
 import logging
@@ -294,10 +296,78 @@ def _short_data(brand, script) -> dict:
     }
 
 
+def _render_cinematic_ad(brand, script, slug: str, ps):
+    """Four graded AI shots with the typography composited over them.
+
+    The script model already writes a `visual` per scene - those ARE shot
+    descriptions, so no second generation step is needed to get them.
+    """
+    import json
+
+    from ..config import ASSETS
+    from ..media import cinematic, motion
+    from ..media.shorts import brand_theme
+
+    w, h = ps.video_size
+    fps = 24
+    scenes = [s for s in script.scenes if (s.visual or "").strip()][:4]
+    if len(scenes) < 2:
+        raise cinematic.CinematicError(
+            f"only {len(scenes)} scene(s) carry a visual prompt; the cinematic "
+            f"format needs at least two shots")
+
+    ad = cinematic.Ad(slug=slug, width=w, height=h, fps=fps)
+    ad.shots = [cinematic.Shot(s.visual.strip()) for s in scenes]
+    # Footage is generated near the resolution Wan was trained at and upscaled
+    # on assembly; rendering straight to 1080x1920 is slower and no sharper.
+    for i, shot in enumerate(ad.shots):
+        cinematic.render_shot(shot, i, slug, 720, 1280, fps)
+
+    total = sum(s.seconds for s in ad.shots)
+    # One statement per shot, changing on the cut. Text that outlives its shot
+    # is what makes a cut sequence read as a slideshow.
+    cards, at = [], 0.3
+    for i, sc in enumerate(scenes):
+        cap = (sc.caption or "").strip()
+        words = cap.split()
+        mid = max(1, len(words) // 2)
+        cards.append([at, at + ad.shots[i].seconds - 0.3,
+                      brand.name if i == 0 else "",
+                      " ".join(words[:mid]), " ".join(words[mid:])])
+        at += ad.shots[i].seconds
+    data = {"brand": brand_theme(brand), "seconds": total, "cards": cards,
+            "end_at": max(0.0, total - 2.0), "tagline": brand.tagline}
+
+    html = (pathlib.Path(__file__).parent.parent / "media" / "shorts"
+            / "overlay.html").read_text().replace(
+        "<!--DATA-->", f"<script>window.__DATA = {json.dumps(data)};</script>")
+    odir = ASSETS / f".{slug}_overlay"
+    motion.render_frames(html, odir, seconds=total, fps=fps,
+                         width=w, height=h, transparent=True)
+
+    out = ASSETS / f"{slug}.mp4"
+    try:
+        cinematic.assemble(ad, odir, out)
+        motion._add_audio(out, total)
+    finally:
+        for f in odir.glob("*.png"):
+            f.unlink()
+        odir.rmdir()
+        # The plates and untrimmed clips are regenerable and large; one ad
+        # leaves about 1.5GB of them behind, which filled the disk once.
+        for s in ad.shots:
+            for leftover in (s.plate, s.clip):
+                if leftover:
+                    leftover.unlink(missing_ok=True)
+    return out
+
+
 def _render_motion_short(brand, script, slug: str, ps):
     from ..media.shorts import render_short
     from ..config import ASSETS
 
+    if settings.short_template == "cinematic":
+        return _render_cinematic_ad(brand, script, slug, ps)
     return render_short(brand, settings.short_template,
                         _short_data(brand, script),
                         ASSETS / f"{slug}.mp4", size=ps.video_size)

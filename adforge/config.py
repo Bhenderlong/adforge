@@ -114,7 +114,7 @@ class Settings(BaseSettings):
     music_gain_db: float = -20.0
     music_fade_seconds: float = 1.2
     video_engine: str = "motion"
-    short_template: str = "statement"
+    short_template: str = "cinematic"
     media_sync_target: str = ""
     comfy_url: str = "http://127.0.0.1:8189"
     comfy_checkpoint: str = "RealVisXL_V5.0_fp16.safetensors"
