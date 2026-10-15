@@ -115,6 +115,13 @@ class Settings(BaseSettings):
     music_fade_seconds: float = 1.2
     video_engine: str = "motion"
     short_template: str = "cinematic"
+    # Video posts are scored on their written copy - title and description -
+    # while the script model is optimising for on-screen captions. Two
+    # different jobs, one score, and video consistently lands a point or two
+    # below text. This is the floor at which a video post may still publish
+    # automatically. It is deliberately a SEPARATE number from PASS_SCORE so
+    # that lowering it cannot quietly weaken the bar for everything else.
+    video_quality_floor: float = 6.0
     media_sync_target: str = ""
     comfy_url: str = "http://127.0.0.1:8189"
     comfy_checkpoint: str = "RealVisXL_V5.0_fp16.safetensors"

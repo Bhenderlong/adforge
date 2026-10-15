@@ -827,3 +827,36 @@ def test_no_music_is_committed_to_the_repo():
     audio = [p.name for p in d.iterdir()
              if p.suffix.lower() in (".mp3", ".m4a", ".wav", ".aac", ".flac", ".ogg")]
     assert not audio, f"audio files present in data/music: {audio}"
+
+
+def test_the_video_floor_does_not_lower_the_text_bar():
+    """Video is admitted between the floor and the bar; text is not.
+
+    The critic scores written copy while the script model writes on-screen
+    captions, so video lands low for a reason unrelated to the finished ad.
+    That is an argument for a SEPARATE number, not for weakening PASS_SCORE -
+    and the separation is the whole point, so it is asserted.
+    """
+    from adforge.config import Settings
+    from adforge.llm.copywriter import PASS_SCORE
+
+    floor = Settings.model_fields["video_quality_floor"].default
+    assert floor < PASS_SCORE, "the floor must be below the bar to mean anything"
+
+    src = pathlib.Path("adforge/scheduler/planner.py").read_text()
+    body = src.split("A post that never cleared", 1)[1].split("\n\n", 3)[0:4]
+    body = "\n\n".join(body)
+    # The relaxation must be conditioned on the platform being video-first AND
+    # on a video actually having been produced.
+    assert "ps.key in VIDEO_FIRST" in body
+    assert "bool(post.video_path)" in body
+    assert "settings.video_quality_floor" in body
+
+
+def test_an_admitted_video_post_says_so():
+    """A bar that was lowered invisibly is worse than one that never existed."""
+    src = pathlib.Path("adforge/scheduler/planner.py").read_text()
+    block = src.split("if admitted:", 1)[1].split("elif", 1)[0]
+    assert "admitted on the video floor" in block
+    assert "floor" in block and "text bar" in block, \
+        "the note must name both numbers so the decision is auditable"

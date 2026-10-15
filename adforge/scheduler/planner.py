@@ -192,7 +192,24 @@ def fill_slot(
 
     # A post that never cleared the quality bar always waits for a human,
     # whatever the account's mode is.
-    if not draft.passed:
+    #
+    # Video is the exception, and it is an explicit one. The critic scores the
+    # written copy while the script model is writing on-screen captions, so
+    # video lands a point or two low for a reason that has nothing to do with
+    # the finished ad. Admitting it between the video floor and the real bar
+    # is recorded in the notes rather than left silent - a bar that was
+    # lowered invisibly is worse than one that was never there.
+    video = ps.key in VIDEO_FIRST and bool(post.video_path)
+    admitted = (video and not draft.passed
+                and draft.score >= settings.video_quality_floor)
+
+    if admitted:
+        post.critic_notes = (
+            f"admitted on the video floor (score {draft.score:.1f}, floor "
+            f"{settings.video_quality_floor:.1f}, text bar 7.0); "
+            + post.critic_notes
+        )
+    elif not draft.passed:
         post.mode = PostMode.MANUAL
         post.critic_notes = (
             f"below quality bar (score {draft.score:.1f}); "
