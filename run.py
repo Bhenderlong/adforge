@@ -60,6 +60,43 @@ def check() -> int:
         if models:
             print(f"       available: {', '.join(models[:12])}"
                   f"{' ...' if len(models) > 12 else ''}")
+    else:
+        # Listed is not the same as loadable. A disk cleanup removed the blobs
+        # for llama3.3:70b while leaving its manifest, so it appeared in the
+        # model list and returned 404 on every call - and this check reported
+        # "6 models, 0 problems" the whole time. Each configured model is now
+        # actually invoked.
+        import httpx
+
+        from adforge.gpu import _ollama_unload
+
+        seen = set()
+        for label, name in [("writer", settings.model_writer),
+                            ("critic", settings.model_critic),
+                            ("fast", settings.model_fast)]:
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            try:
+                r = httpx.post(f"{settings.llm_base}/chat/completions",
+                               json={"model": name, "max_tokens": 4,
+                                     "messages": [{"role": "user", "content": "hi"}]},
+                               timeout=180)
+                if r.status_code >= 400:
+                    detail = r.json().get("error", {}).get("message", r.text[:90])
+                    print(f"[FAIL] {label} model {name!r} does not load: {detail[:90]}")
+                    problems += 1
+                else:
+                    print(f"[ ok ] {label} model {name} responds")
+            except Exception as e:  # noqa: BLE001
+                print(f"[FAIL] {label} model {name!r}: {e}")
+                problems += 1
+
+        # Unload what the probe just loaded. A 70B stays resident for minutes
+        # and fills both cards, so a preflight that left it there would block
+        # the next render - the check would cause the failure it exists to
+        # detect.
+        _ollama_unload()
 
     if comfy.is_up():
         cks = comfy.checkpoints()

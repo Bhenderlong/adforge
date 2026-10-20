@@ -860,3 +860,40 @@ def test_an_admitted_video_post_says_so():
     assert "admitted on the video floor" in block
     assert "floor" in block and "text bar" in block, \
         "the note must name both numbers so the decision is auditable"
+
+
+def test_a_banned_subject_is_replaced_not_stripped_to_nothing():
+    """The first clause names the object; losing it leaves no subject.
+
+    "a stack of books, warm lamp light" minus the books is a lighting note,
+    which renders as dark textured wallpaper - worse than a generic object.
+    """
+    from adforge.media.cinematic import FALLBACK_SUBJECTS, clean_subject
+
+    out = clean_subject("a stack of regulatory books, a hand reaching, warm lamp light")
+    assert out in FALLBACK_SUBJECTS, f"got {out!r}"
+    # A good subject with a bad trailing clause keeps the object.
+    out2 = clean_subject("a single graphics card on a dark bench, a hand in shot, rim light")
+    assert out2.startswith("a single graphics card")
+    assert "hand" not in out2
+
+
+def test_the_script_prompt_forbids_people_and_writing():
+    """Its own GOOD examples used to suggest "a stamped document", which for a
+    compliance brand produced a stack of books with "Rm Lick" on the spines."""
+    src = pathlib.Path("adforge/media/script.py").read_text()
+    assert "NO PEOPLE." in src
+    assert "NO WRITING." in src
+    assert "a stamped document" not in src, "that example invites unspellable text"
+
+
+def test_preflight_releases_the_models_it_loads():
+    """A 70B stays resident for minutes and fills both cards.
+
+    The probe that proves a model loads would otherwise block the next render -
+    the check would cause the failure it exists to detect.
+    """
+    src = pathlib.Path("run.py").read_text()
+    block = src.split("writer\", settings.model_writer", 1)[1].split("if comfy.is_up()", 1)[0]
+    assert "_ollama_unload()" in block, \
+        "preflight must unload after probing, or it strands VRAM"

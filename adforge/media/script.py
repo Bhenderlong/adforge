@@ -50,9 +50,22 @@ that nobody stops scrolling for.
   GOOD: "one open server chassis viewed from above, RAM sticks in a row,
          cables running off frame"
 Name the object first, then how it is lit and framed. One object per scene,
-not a collection. Prefer real hardware you could photograph: a GPU, a fan
-stack, a rack rail, a cable bundle, a drive tray, a padlock, a filing drawer,
-a stamped document.
+not a collection.
+
+NO PEOPLE. No hands, no fingers, no arms reaching into frame, nobody holding
+or touching anything, no figures in the background. The image model renders
+hands with the wrong number of fingers and it is the single most recognisable
+sign that a frame was generated. If the idea needs a person, find the object
+they would be using and shoot that instead.
+
+NO WRITING. No books, documents, forms, certificates, folders, screens showing
+text, labels, nameplates or signage. The model cannot spell: a stack of books
+comes back with "Rm Lick" on the spines. This rules out the obvious compliance
+imagery, and that is deliberate - paperwork is a cliche anyway.
+
+Prefer real hardware you could photograph: a GPU, a fan stack, a rack rail, a
+cable bundle, a drive tray, a padlock, a sealed enclosure, a fibre patch
+panel, a locked cabinet, a key, a vault door, a steel hinge.
 
 NO NUMBERS, CAPACITIES OR BRAND NAMES in a visual direction. The image model
 tries to render any it sees as text on the object and produces garbled

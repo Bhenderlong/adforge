@@ -94,6 +94,52 @@ class Ad:
     fps: int = 24
 
 
+# Words that put a hand or unspellable lettering in frame. Stripped from the
+# subject as a backstop: the script prompt forbids them, but a model that
+# ignores an instruction once will ignore it again, and the cost of one bad
+# frame is the whole ad.
+BANNED_SUBJECT_WORDS = (
+    "hand", "hands", "finger", "fingers", "arm", "arms", "person", "people",
+    "man", "woman", "engineer", "developer", "team", "someone", "holding",
+    "reaching", "touching", "typing", "book", "books", "document", "documents",
+    "paper", "papers", "form", "forms", "certificate", "folder", "binder",
+    "sign", "signage", "label", "screen", "monitor", "display", "dashboard",
+)
+
+
+# Used when the named object is itself the problem. A lighting description
+# with no subject renders as dark textured wallpaper, which is worse than a
+# generic object: at least an object gives the viewer something to look at.
+FALLBACK_SUBJECTS = (
+    "a sealed matte-black equipment enclosure on a dark bench",
+    "a steel rack rail lit from one side against deep shadow",
+    "a fibre patch panel, cables curving away into darkness",
+    "a heavy locked cabinet door, single hard key light",
+)
+
+
+def clean_subject(subject: str, i: int = 0) -> str:
+    """Drop clauses that would put a person or lettering in the frame.
+
+    The FIRST clause names the object. If that clause is the offending one
+    there is nothing left to photograph, so the whole direction is replaced
+    rather than salvaged - stripping "a stack of books" out of "a stack of
+    books, warm lamp light" leaves a lighting note and no subject.
+    """
+    parts = [c.strip() for c in subject.split(",") if c.strip()]
+    if not parts:
+        return FALLBACK_SUBJECTS[i % len(FALLBACK_SUBJECTS)]
+
+    def banned(clause: str) -> bool:
+        words = clause.lower().replace("-", " ").split()
+        return any(w.strip(".") in BANNED_SUBJECT_WORDS for w in words)
+
+    if banned(parts[0]):
+        return FALLBACK_SUBJECTS[i % len(FALLBACK_SUBJECTS)]
+    kept = [c for c in parts if not banned(c)]
+    return ", ".join(kept)
+
+
 def plate_prompt(shot: Shot, i: int) -> str:
     """The still that the motion is generated from.
 
@@ -102,11 +148,12 @@ def plate_prompt(shot: Shot, i: int) -> str:
     plate cannot be rescued by the video model.
     """
     look = shot.look or LOOKS[i % len(LOOKS)]
+    subject = clean_subject(shot.subject, i)
     # No brand or product names anywhere in here. "shot on ARRI Alexa" put
     # the word ARRI onto the side of a graphics card in the first scheduled
     # ad - the plate model renders names it is given as lettering in the
     # image, and lettering is exactly what it cannot spell.
-    return (f"cinematic commercial still, {shot.subject}, {look}, "
+    return (f"cinematic commercial still, {subject}, {look}, "
             f"large format digital cinema camera, photoreal, filmic colour "
             f"grade, fine film grain, professional advertising photography, "
             f"unbranded hardware, blank surfaces, no people")
@@ -120,7 +167,7 @@ def render_shot(shot: Shot, i: int, slug: str, w: int, h: int,
 
     graph = comfy.build_txt2img(
         settings.comfy_checkpoint, plate_prompt(shot, i), NEGATIVE,
-        width=w, height=h, steps=30, cfg=5.0, seed=seed)
+        width=w, height=h, steps=30, cfg=7.5, seed=seed)
     with gpu(MEDIA):
         files = comfy.run(graph)
     comfy.fetch(files[0], plate)
@@ -134,7 +181,7 @@ def render_shot(shot: Shot, i: int, slug: str, w: int, h: int,
 
     handle = comfy.upload_image(plate)
     vg = comfy.build_i2v(
-        handle, f"{move}, {shot.subject}", NEGATIVE, seed=seed,
+        handle, f"{move}, {clean_subject(shot.subject, i)}", NEGATIVE, seed=seed,
         high_noise=settings.wan_high_noise, low_noise=settings.wan_low_noise,
         vae=settings.wan_vae, text_encoder=settings.wan_text_encoder,
         lora_high=settings.wan_lora_high, lora_low=settings.wan_lora_low,
