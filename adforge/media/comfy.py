@@ -233,6 +233,32 @@ def upload_image(path: Path, subfolder: str = "adforge") -> str:
     return f"{sub}/{out['name']}" if sub else out["name"]
 
 
+def resolve_option(node_class: str, field: str, name: str) -> str:
+    """Match `name` against what the engine actually offers.
+
+    ComfyUI addresses a model by its path relative to the models directory, so
+    the same file is "foo.safetensors" at the top level and
+    "downloaded/foo.safetensors" one folder deeper. Moving a file renames it
+    from the API's point of view, and the graph then fails validation with
+    "Value not in list" for a model that is plainly on disk - which has now
+    happened twice. Fall back to a basename match before giving up.
+    """
+    if not name:
+        return name
+    try:
+        options = list_options(node_class, field)
+    except Exception:  # noqa: BLE001 - engine down is handled by the caller
+        return name
+    if name in options:
+        return name
+    base = name.rsplit("/", 1)[-1]
+    for opt in options:
+        if opt.rsplit("/", 1)[-1] == base:
+            log.info("resolved %r -> %r", name, opt)
+            return opt
+    return name
+
+
 def build_i2v(
     image_handle: str,
     prompt: str,

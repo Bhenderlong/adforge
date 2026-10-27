@@ -166,7 +166,9 @@ def render_shot(shot: Shot, i: int, slug: str, w: int, h: int,
     plate = ASSETS / f"{slug}_s{i}_plate.png"
 
     graph = comfy.build_txt2img(
-        settings.comfy_checkpoint, plate_prompt(shot, i), NEGATIVE,
+        comfy.resolve_option("CheckpointLoaderSimple", "ckpt_name",
+                             settings.comfy_checkpoint),
+        plate_prompt(shot, i), NEGATIVE,
         width=w, height=h, steps=30, cfg=7.5, seed=seed)
     with gpu(MEDIA):
         files = comfy.run(graph)
@@ -182,9 +184,20 @@ def render_shot(shot: Shot, i: int, slug: str, w: int, h: int,
     handle = comfy.upload_image(plate)
     vg = comfy.build_i2v(
         handle, f"{move}, {clean_subject(shot.subject, i)}", NEGATIVE, seed=seed,
-        high_noise=settings.wan_high_noise, low_noise=settings.wan_low_noise,
-        vae=settings.wan_vae, text_encoder=settings.wan_text_encoder,
-        lora_high=settings.wan_lora_high, lora_low=settings.wan_lora_low,
+        # Every model name goes through the resolver: a file moved into a
+        # subfolder keeps its bytes and changes its identifier, and that has
+        # now broken a render twice.
+        high_noise=comfy.resolve_option("UNETLoader", "unet_name",
+                                        settings.wan_high_noise),
+        low_noise=comfy.resolve_option("UNETLoader", "unet_name",
+                                       settings.wan_low_noise),
+        vae=comfy.resolve_option("VAELoader", "vae_name", settings.wan_vae),
+        text_encoder=comfy.resolve_option("CLIPLoader", "clip_name",
+                                          settings.wan_text_encoder),
+        lora_high=comfy.resolve_option("LoraLoaderModelOnly", "lora_name",
+                                       settings.wan_lora_high),
+        lora_low=comfy.resolve_option("LoraLoaderModelOnly", "lora_name",
+                                      settings.wan_lora_low),
         lora_strength=settings.wan_lora_strength,
         steps=settings.wan_steps, cfg=settings.wan_cfg,
         length=frames, width=w, height=h, fps=fps)

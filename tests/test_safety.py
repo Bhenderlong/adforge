@@ -897,3 +897,20 @@ def test_preflight_releases_the_models_it_loads():
     block = src.split("writer\", settings.model_writer", 1)[1].split("if comfy.is_up()", 1)[0]
     assert "_ollama_unload()" in block, \
         "preflight must unload after probing, or it strands VRAM"
+
+
+def test_model_names_resolve_by_basename():
+    """ComfyUI addresses a model by its path relative to the models directory.
+
+    Moving a file into a subfolder keeps its bytes and changes its identifier,
+    so the graph fails validation for a model plainly on disk. That broke a
+    render twice before this existed.
+    """
+    src = pathlib.Path("adforge/media/comfy.py").read_text()
+    assert "def resolve_option" in src
+    body = src.split("def resolve_option", 1)[1].split("\ndef ", 1)[0]
+    assert 'rsplit("/", 1)[-1]' in body, "must compare basenames"
+
+    cine = pathlib.Path("adforge/media/cinematic.py").read_text()
+    for field in ("unet_name", "vae_name", "clip_name", "lora_name", "ckpt_name"):
+        assert field in cine, f"{field} is not resolved in the cinematic path"

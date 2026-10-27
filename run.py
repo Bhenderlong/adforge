@@ -131,7 +131,8 @@ def check() -> int:
             loras = comfy.list_options("LoraLoaderModelOnly", "lora_name")
             for name, label in [(settings.wan_lora_high, "wan high-noise lora"),
                                 (settings.wan_lora_low, "wan low-noise lora")]:
-                if name and name not in loras:
+                if name and comfy.resolve_option(
+                        "LoraLoaderModelOnly", "lora_name", name) not in loras:
                     print(f"[warn] {label} {name!r} not found - with "
                           f"wan_steps={settings.wan_steps} the render will be "
                           f"noise, or fail outright")
